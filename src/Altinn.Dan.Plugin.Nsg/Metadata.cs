@@ -1,10 +1,10 @@
 using System.Collections.Generic;
-using Altinn.Dan.Plugin.DATASOURCENAME.Config;
+using Altinn.Dan.Plugin.Nsg.Config;
 using Nadobe.Common.Interfaces;
 using Nadobe.Common.Models;
 using Nadobe.Common.Models.Enums;
 
-namespace Altinn.Dan.Plugin.DATASOURCENAME
+namespace Altinn.Dan.Plugin.Nsg
 {
     public class Metadata
     {
@@ -72,7 +72,7 @@ namespace Altinn.Dan.Plugin.DATASOURCENAME
 
     public class EvidenceSourceMetadata : IEvidenceSourceMetadata
     {
-        public const string SOURCE = "DATASOURCENAME";
+        public const string SOURCE = "Nsg";
 
         public const int ERROR_ORGANIZATION_NOT_FOUND = 1;
 

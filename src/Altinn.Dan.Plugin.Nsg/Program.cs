@@ -2,7 +2,7 @@ using System;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading.Tasks;
-using Altinn.Dan.Plugin.DATASOURCENAME.Config;
+using Altinn.Dan.Plugin.Nsg.Config;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -11,7 +11,7 @@ using Polly.Caching.Distributed;
 using Polly.Extensions.Http;
 using Polly.Registry;
 
-namespace Altinn.Dan.Plugin.DATASOURCENAME
+namespace Altinn.Dan.Plugin.Nsg
 {
     class Program
     {

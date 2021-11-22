@@ -3,7 +3,7 @@ using System.IO;
 using System.Net;
 using System.Net.Http;
 using System.Threading.Tasks;
-using Altinn.Dan.Plugin.DATASOURCENAME.Config;
+using Altinn.Dan.Plugin.Nsg.Config;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
@@ -14,7 +14,7 @@ using Nadobe.Common.Models;
 using Nadobe.Common.Util;
 using Newtonsoft.Json;
 
-namespace Altinn.Dan.Plugin.DATASOURCENAME
+namespace Altinn.Dan.Plugin.Nsg
 {
     public class Main
     {
