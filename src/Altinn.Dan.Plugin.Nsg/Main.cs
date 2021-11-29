@@ -1,65 +1,157 @@
+using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Threading.Tasks;
-using Altinn.Dan.Plugin.Nsg.Config;
+using Altinn.Dan.Plugin.Nsg.Models;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
-using Microsoft.Extensions.Logging;
 using Nadobe;
 using Nadobe.Common.Exceptions;
+using Nadobe.Common.Interfaces;
 using Nadobe.Common.Models;
 using Nadobe.Common.Util;
 using Newtonsoft.Json;
+using NorUnit = Altinn.Dan.Plugin.Nsg.Models.NOR.Unit;
+using FinUnit = Altinn.Dan.Plugin.Nsg.Models.FIN.Unit;
 
 namespace Altinn.Dan.Plugin.Nsg
 {
     public class Main
     {
-        private ILogger _logger;
         private HttpClient _client;
-        private ApplicationSettings _settings;
-        private EvidenceSourceMetadata _metadata;
+        private readonly IEvidenceSourceMetadata _evidenceSourceMetadata;
 
-        public Main(IHttpClientFactory httpClientFactory, IApplicationSettings settings)
+        public Main(IHttpClientFactory httpClientFactory, IEvidenceSourceMetadata evidenceSourceMetadata)
         {
+            _evidenceSourceMetadata = evidenceSourceMetadata;
             _client = httpClientFactory.CreateClient("SafeHttpClient");
-            _settings = (ApplicationSettings)settings;
-            _metadata = new EvidenceSourceMetadata(_settings);
         }
 
-        [Function("DATASETNAME1")]
-        public async Task<HttpResponseData> Dataset1(
-            [HttpTrigger(AuthorizationLevel.Function, "post", Route = null)] HttpRequestData req,
-            FunctionContext context)
+        [Function("NsgCompanyBasicInformation")]
+        public async Task<HttpResponseData> NsgCompanyBasicInformation(
+            [HttpTrigger(AuthorizationLevel.Function, "post", Route = null)] HttpRequestData req)
         {
-            _logger = context.GetLogger(context.FunctionDefinition.Name);
-            _logger.LogInformation("Running func 'DATASETNAME1'");
             var requestBody = await new StreamReader(req.Body).ReadToEndAsync();
             var evidenceHarvesterRequest = JsonConvert.DeserializeObject<EvidenceHarvesterRequest>(requestBody);
 
-            var actionResult = await EvidenceSourceResponse.CreateResponse(null, () => GetEvidenceValuesDatasetName1(evidenceHarvesterRequest)) as ObjectResult;
-            var response = req.CreateResponse(HttpStatusCode.OK);
-            await response.WriteAsJsonAsync(actionResult?.Value);
+            var actionResult = await EvidenceSourceResponse.CreateResponse(null, () => GetNsgCompanyBasicInformationDatasetName(evidenceHarvesterRequest)) as ObjectResult;
+            var response = req.CreateResponse((HttpStatusCode)actionResult!.StatusCode!);
+            await response.WriteAsJsonAsync(actionResult.Value);
             return response;
         }
 
-        private async Task<List<EvidenceValue>> GetEvidenceValuesDatasetName1(EvidenceHarvesterRequest evidenceHarvesterRequest)
+        private async Task<List<EvidenceValue>> GetNsgCompanyBasicInformationDatasetName(EvidenceHarvesterRequest evidenceHarvesterRequest)
         {
-            dynamic content = await MakeRequest(string.Format(_settings.DATASETNAME1URL, evidenceHarvesterRequest.OrganizationNumber), evidenceHarvesterRequest.OrganizationNumber);
-
-            var ecb = new EvidenceBuilder(_metadata, "DATASETNAME1");
-            ecb.AddEvidenceValue($"field1", content.responsefield1, EvidenceSourceMetadata.SOURCE);
-            ecb.AddEvidenceValue($"field2", content.responsefield2, EvidenceSourceMetadata.SOURCE);
+            CompanyInformation companyInformation = await GetCompanyInformation(evidenceHarvesterRequest.OrganizationNumber);
+            var ecb = new EvidenceBuilder(_evidenceSourceMetadata, "NsgCompanyBasicInformation");
+            ecb.AddEvidenceValue("default", JsonConvert.SerializeObject(companyInformation), EvidenceSourceMetadata.Source);
 
             return ecb.GetEvidenceValues();
         }
 
-        private async Task<dynamic> MakeRequest(string target, string organizationNumber)
+        private async Task<CompanyInformation> GetCompanyInformation(string identifier)
         {
-            HttpResponseMessage result = null;
+
+            var parts = identifier.Split(':');
+            if (parts.Length != 2)
+            {
+                throw new EvidenceSourcePermanentClientException(EvidenceSourceMetadata.ErrorOrganizationNotFound, $"{identifier} has an unknown format. Expects a ISO/IEC 6523 identifier + \":\" + company-id ");
+            }
+
+            return parts[0] switch
+            {
+                "0192" => await GetFromNorway(parts[1], identifier),
+                "0212" => await GetFromFinland(parts[1], identifier),
+                _ => throw new EvidenceSourcePermanentClientException(
+                    EvidenceSourceMetadata.ErrorOrganizationNotFound,
+                    $"{parts[0]} is not a recognized ISO/IEC 6523 identifier")
+            };
+        }
+
+        private async Task<CompanyInformation> GetFromNorway(string organizationNumber, string identifier)
+        {
+            // TODO! Underenheter
+            var url = "https://data.brreg.no/enhetsregisteret/api/enheter/" + organizationNumber;
+            var unit = await MakeRequest<NorUnit>(url, identifier);
+
+            var ci = new CompanyInformation
+            {
+                Identifier = identifier,
+                RegisteredOrganization = new RegisteredOrganization
+                {
+                    LegalName = unit.Navn,
+                    Jurisdiction = "no"
+                }
+            };
+
+            if (unit.Slettedato != DateTimeOffset.MinValue)
+            {
+                ci.RegisteredOrganization.DissolutionDate = unit.Slettedato.ToString("yyyy-MM-dd");
+                ci.Address = new Address();
+            }
+            else
+            {
+                // Only available on non-deleted units
+                ci.RegisteredOrganization.FoundingDate = unit.RegistreringsdatoEnhetsregisteret.ToString("yyyy-MM-dd");
+                ci.Address = new Address
+                {
+                    Thoroughfare = string.Join("\n", unit.Forretningsadresse.Adresse),
+                    PostCode = unit.Forretningsadresse.Postnummer,
+                    PostName = unit.Forretningsadresse.Poststed,
+                    AdminUnitL1 = unit.Forretningsadresse.Landkode.ToLowerInvariant()
+                };
+            }
+
+            return ci;
+        }
+
+        private async Task<CompanyInformation> GetFromFinland(string companyId, string identifier)
+        {
+            var url = "http://avoindata.prh.fi/bis/v1/" + companyId;
+            var results = await MakeRequest<FinUnit>(url, identifier);
+            var unit = results.Results[0];
+            var sortedAdresses = unit.Addresses.OrderByDescending(x => x.RegistrationDate);
+            var firstAddress = sortedAdresses.FirstOrDefault(x => !x.EndDate.HasValue);
+            var liquidations = unit.Liquidations?.OrderByDescending(x => x.RegistrationDate);
+            var liquidation = liquidations?.FirstOrDefault();
+
+            var ci = new CompanyInformation
+            {
+                Identifier = identifier,
+                RegisteredOrganization = new RegisteredOrganization
+                {
+                    LegalName = unit.Name,
+                    FoundingDate = unit.RegistrationDate.ToString("yyyy-MM-dd"),
+                    Jurisdiction = "fi",
+                }
+            };
+
+            if (firstAddress != null)
+            {
+                ci.Address = new Address
+                {
+                    Thoroughfare = firstAddress.Street,
+                    PostCode = firstAddress.PostCode.ToString(),
+                    PostName = firstAddress.City,
+                    AdminUnitL1 = firstAddress.Country ?? "fi" // always null in API?
+                };
+            }
+
+            if (liquidation?.RegistrationDate != null)
+            {
+                ci.RegisteredOrganization.DissolutionDate = liquidation.RegistrationDate.Value.ToString("yyyy-MM-dd");
+            }
+
+            return ci;
+        }
+
+        private async Task<T> MakeRequest<T>(string target, string identifier)
+        {
+            HttpResponseMessage result;
             try
             {
                 var request = new HttpRequestMessage(HttpMethod.Get, target);
@@ -67,61 +159,32 @@ namespace Altinn.Dan.Plugin.Nsg
             }
             catch (HttpRequestException ex)
             {
-                throw new EvidenceSourcePermanentServerException(EvidenceSourceMetadata.ERROR_CCR_UPSTREAM_ERROR, null, ex);
+                throw new EvidenceSourcePermanentServerException(EvidenceSourceMetadata.ErrorUpstreamError, null, ex);
             }
 
             if (result.StatusCode == HttpStatusCode.NotFound)
             {
-                throw new EvidenceSourcePermanentClientException(EvidenceSourceMetadata.ERROR_ORGANIZATION_NOT_FOUND, $"{organizationNumber} could not be found");
+                throw new EvidenceSourcePermanentClientException(EvidenceSourceMetadata.ErrorOrganizationNotFound, $"{identifier} could not be found");
             }
 
-            var response = JsonConvert.DeserializeObject(await result.Content.ReadAsStringAsync());
+            var response = JsonConvert.DeserializeObject<T>(await result.Content.ReadAsStringAsync());
             if (response == null)
             {
-                throw new EvidenceSourcePermanentServerException(EvidenceSourceMetadata.ERROR_CCR_UPSTREAM_ERROR,
+                throw new EvidenceSourcePermanentServerException(EvidenceSourceMetadata.ErrorUpstreamError,
                     "Did not understand the data model returned from upstream source");
             }
 
             return response;
         }
-
-        [Function("DATASETNAME2")]
-        public async Task<HttpResponseData> Dataset2(
-            [HttpTrigger(AuthorizationLevel.Function, "post", Route = null)] HttpRequestData req,
-            FunctionContext context)
-        {
-            _logger = context.GetLogger(context.FunctionDefinition.Name);
-            _logger.LogInformation("Running func 'DATASETNAME2'");
-            var requestBody = await new StreamReader(req.Body).ReadToEndAsync();
-            var evidenceHarvesterRequest = JsonConvert.DeserializeObject<EvidenceHarvesterRequest>(requestBody);
-
-            var actionResult = await EvidenceSourceResponse.CreateResponse(null, () => GetEvidenceValuesDatasetName2(evidenceHarvesterRequest)) as ObjectResult;
-            var response = req.CreateResponse(HttpStatusCode.OK);
-            await response.WriteAsJsonAsync(actionResult?.Value);
-            return response;
-        }
-
-        private async Task<List<EvidenceValue>> GetEvidenceValuesDatasetName2(EvidenceHarvesterRequest evidenceHarvesterRequest)
-        {
-            dynamic content = await MakeRequest(string.Format(_settings.DATASETNAME2URL, evidenceHarvesterRequest.OrganizationNumber), evidenceHarvesterRequest.OrganizationNumber);
-
-            var ecb = new EvidenceBuilder(_metadata, "DATASETNAME2");
-            ecb.AddEvidenceValue($"field1", content.responsefield1, EvidenceSourceMetadata.SOURCE);
-            ecb.AddEvidenceValue($"field2", content.responsefield2, EvidenceSourceMetadata.SOURCE);
-            ecb.AddEvidenceValue($"field3", content.responsefield3, EvidenceSourceMetadata.SOURCE);
-
-            return ecb.GetEvidenceValues();
-        }
+       
 
         [Function(Constants.EvidenceSourceMetadataFunctionName)]
         public async Task<HttpResponseData> Metadata(
             [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = null)] HttpRequestData req,
             FunctionContext context)
         {
-            _logger = context.GetLogger(context.FunctionDefinition.Name);
-            _logger.LogInformation($"Running metadata for {Constants.EvidenceSourceMetadataFunctionName}");
             var response = req.CreateResponse(HttpStatusCode.OK);
-            await response.WriteAsJsonAsync(_metadata.GetEvidenceCodes());
+            await response.WriteAsJsonAsync(_evidenceSourceMetadata.GetEvidenceCodes());
             return response;
         }
     }
