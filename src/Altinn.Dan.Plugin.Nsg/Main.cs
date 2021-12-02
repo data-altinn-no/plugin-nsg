@@ -68,7 +68,7 @@ namespace Altinn.Dan.Plugin.Nsg
                 "0212" => await GetFromFinland(parts[1], identifier),
                 _ => throw new EvidenceSourcePermanentClientException(
                     EvidenceSourceMetadata.ErrorOrganizationNotFound,
-                    $"{parts[0]} is not a recognized ISO/IEC 6523 identifier")
+                    $"{parts[0]} is not a recognized ISO/IEC 6523 identifier. Supported ICDs are 0192 (Norway) and 0212 (Finland).")
             };
         }
 
@@ -159,12 +159,21 @@ namespace Altinn.Dan.Plugin.Nsg
             }
             catch (HttpRequestException ex)
             {
-                throw new EvidenceSourcePermanentServerException(EvidenceSourceMetadata.ErrorUpstreamError, null, ex);
+                throw new EvidenceSourceTransientException(EvidenceSourceMetadata.ErrorUpstreamError, "Error communicating with upstream source", ex);
             }
 
-            if (result.StatusCode == HttpStatusCode.NotFound)
+            if (!result.IsSuccessStatusCode)
             {
-                throw new EvidenceSourcePermanentClientException(EvidenceSourceMetadata.ErrorOrganizationNotFound, $"{identifier} could not be found");
+                throw result.StatusCode switch
+                {
+                    HttpStatusCode.NotFound => new EvidenceSourcePermanentClientException(
+                        EvidenceSourceMetadata.ErrorOrganizationNotFound, "Upstream source could not find provided company-id"),
+                    HttpStatusCode.BadRequest => new EvidenceSourcePermanentClientException(
+                        EvidenceSourceMetadata.ErrorInvalidInput,
+                        "Upstream source indicated an invalid company-id (400)"),
+                    _ => new EvidenceSourceTransientException(EvidenceSourceMetadata.ErrorUpstreamError,
+                        $"Upstream source retuned an HTTP error code ({(int)result.StatusCode})")
+                };
             }
 
             var response = JsonConvert.DeserializeObject<T>(await result.Content.ReadAsStringAsync());
