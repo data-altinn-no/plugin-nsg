@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "Altinn.Dan.Plugin.Nsg": {
+      "commandName": "Project",
+      "commandLineArgs": "host start --pause-on-error --port 7099 --nodeDebugPort 5859 "
+    }
+  }
+}

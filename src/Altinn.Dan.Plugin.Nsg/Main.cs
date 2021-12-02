@@ -59,7 +59,7 @@ namespace Altinn.Dan.Plugin.Nsg
             var parts = identifier.Split(':');
             if (parts.Length != 2)
             {
-                throw new EvidenceSourcePermanentClientException(EvidenceSourceMetadata.ErrorOrganizationNotFound, $"{identifier} has an unknown format. Expects a ISO/IEC 6523 identifier + \":\" + company-id ");
+                throw new EvidenceSourcePermanentClientException(EvidenceSourceMetadata.ErrorInvalidInput, $"'{identifier}' has an unknown format. Expects a ISO/IEC 6523 identifier + \":\" + company-id ");
             }
 
             return parts[0] switch

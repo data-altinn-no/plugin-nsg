@@ -9,9 +9,11 @@ namespace Altinn.Dan.Plugin.Nsg
     {
         public const string Source = "Nsg";
 
-        public const int ErrorOrganizationNotFound = 1;
+        public const int ErrorInvalidInput = 1;
 
-        public const int ErrorUpstreamError = 2;
+        public const int ErrorOrganizationNotFound = 2;
+
+        public const int ErrorUpstreamError = 3;
 
         public List<EvidenceCode> GetEvidenceCodes()
         {
@@ -21,8 +23,8 @@ namespace Altinn.Dan.Plugin.Nsg
                 {
                     EvidenceCodeName = "NsgCompanyBasicInformation",
                     EvidenceSource = Source,
-                    ServiceContext = "nsg",
-                    // Public = true,
+                    ServiceContext = "Nordic Smart Government",
+                    IsPublic = true,
                     Values = new List<EvidenceValue>()
                     {
                         new()
