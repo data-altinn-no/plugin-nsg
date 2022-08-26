@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 using Altinn.Dan.Plugin.Nsg.Config;
+using Microsoft.Azure.Functions.Worker;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Nadobe.Common.Interfaces;
@@ -19,7 +20,14 @@ namespace Altinn.Dan.Plugin.Nsg
         private static Task Main(string[] args)
         {
             var host = new HostBuilder()
-                .ConfigureFunctionsWorkerDefaults()
+                .ConfigureFunctionsWorkerDefaults(builder =>
+                {
+                    builder
+                        // Using preview package Microsoft.Azure.Functions.Worker.ApplicationInsights, see https://github.com/Azure/azure-functions-dotnet-worker/pull/944
+                        // Requires APPLICATIONINSIGHTS_CONNECTION_STRING being set. Note that host.json logging settings will have to be replicated to worker.json
+                        .AddApplicationInsights()
+                        .AddApplicationInsightsLogger();
+                })
                 .ConfigureServices(services =>
                 {
                     services.AddLogging();
