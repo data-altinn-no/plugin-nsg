@@ -3,10 +3,11 @@
   "Values": {
     "AzureWebJobsStorage": "UseDevelopmentStorage=true",
     "FUNCTIONS_WORKER_RUNTIME": "dotnet-isolated",
-    "DATASETNAME1URL": "",
-    "DATASETNAME2URL": "",
-    "IsTest": "",
-    "Breaker_RetryWaitTime": "",
-    "Breaker_OpenCircuitTime": ""
+
+
+    "Settings:DefaultCircuitBreakerOpenCircuitTimeSeconds": "10",
+    "Settings:DefaultCircuitBreakerFailureBeforeTripping": "4",
+    "Settings:SafeHttpClientTimeout": "30"
+
   }
 }
