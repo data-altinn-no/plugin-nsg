@@ -27,7 +27,7 @@ public class Plugin
     public Plugin(IHttpClientFactory httpClientFactory, IEvidenceSourceMetadata evidenceSourceMetadata)
     {
         _evidenceSourceMetadata = evidenceSourceMetadata;
-        _client = httpClientFactory.CreateClient("SafeHttpClient");
+        _client = httpClientFactory.CreateClient(Constants.SafeHttpClient);
     }
 
     [Function("NsgCompanyBasicInformation")]
@@ -180,17 +180,6 @@ public class Plugin
                 "Did not understand the data model returned from upstream source");
         }
 
-        return response;
-    }
-       
-
-    [Function(Constants.EvidenceSourceMetadataFunctionName)]
-    public async Task<HttpResponseData> Metadata(
-        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = null)] HttpRequestData req,
-        FunctionContext context)
-    {
-        var response = req.CreateResponse(HttpStatusCode.OK);
-        await response.WriteAsJsonAsync(_evidenceSourceMetadata.GetEvidenceCodes());
         return response;
     }
 }

@@ -1,7 +1,12 @@
 using System.Collections.Generic;
+using System.Net;
+using System.Threading.Tasks;
+using Dan.Common;
 using Dan.Common.Enums;
 using Dan.Common.Interfaces;
 using Dan.Common.Models;
+using Microsoft.Azure.Functions.Worker;
+using Microsoft.Azure.Functions.Worker.Http;
 
 namespace Altinn.Dan.Plugin.Nsg;
 
@@ -46,5 +51,15 @@ public class EvidenceSourceMetadata : IEvidenceSourceMetadata
                 }
             }
         };
+    }
+
+    [Function(Constants.EvidenceSourceMetadataFunctionName)]
+    public async Task<HttpResponseData> Metadata(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = null)] HttpRequestData req,
+        FunctionContext context)
+    {
+        var response = req.CreateResponse(HttpStatusCode.OK);
+        await response.WriteAsJsonAsync(GetEvidenceCodes());
+        return response;
     }
 }
