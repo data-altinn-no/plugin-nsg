@@ -34,8 +34,7 @@ public class Plugin
     public async Task<HttpResponseData> NsgCompanyBasicInformation(
         [HttpTrigger(AuthorizationLevel.Function, "post", Route = null)] HttpRequestData req)
     {
-        var requestBody = await new StreamReader(req.Body).ReadToEndAsync();
-        var evidenceHarvesterRequest = JsonConvert.DeserializeObject<EvidenceHarvesterRequest>(requestBody);
+        var evidenceHarvesterRequest = await req.ReadFromJsonAsync<EvidenceHarvesterRequest>();
 
         return await EvidenceSourceResponse.CreateResponse(req,
             () => GetNsgCompanyBasicInformationDatasetName(evidenceHarvesterRequest));
