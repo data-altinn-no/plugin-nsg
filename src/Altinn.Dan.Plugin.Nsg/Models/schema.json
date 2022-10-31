@@ -1,80 +1,168 @@
 {
+    "description": "Exchanging information about the broader concept of Agents instead of Companies or Registered Organizations or Persons acting as Sole Traders.",
+    "@id": "http://uri.suomi.fi/datamodel/ns/agent3#",
+    "title": "Agent information",
+    "modified": "Fri, 07 Oct 2022 09:12:40 GMT",
     "$schema": "http://json-schema.org/draft-04/schema#",
     "type": "object",
-    "description": "Loosely based on STIRData business data model (https://stirdata.github.io/data-specification/), which is based on euBusinessGraph Semantic Data Model (https://docs.google.com/document/d/1dhMOTlIOC6dOK_jksJRX0CB-GIRoiYY6fWtCnZArUhU/edit)",
-    "properties": {
-        "Identifier": {
-            "type": "string",
-            "description": "ISO/IEC 6523 identifier"
-
-        },
-        "RegisteredOrganization": {
+    "allOf": [
+        {
+            "$ref": "#/definitions/Agent"
+        }
+    ],
+    "definitions": {
+        "Address": {
+            "title": "Address",
             "type": "object",
+            "@id": "http://uri.suomi.fi/datamodel/ns/ncdrm#Address",
+            "description": "An address representation as conceptually defined by the INSPIRE Address Representation data type: Representation of an address spatial object for use in external application schemas that need to include the basic, address information in a readable way.\n\nThe representation of Addresses varies widely from one country's postal system to another. Even within countries, there are almost always examples of Addresses that do not conform to the stated national standard. However, ISO 19160-1 provides a method through which different Addresses can be converted from one conceptual model to another.\n\nIn this first version of the API we decided to only use - full address (the complete address as a formatted string)",
+            "minProperties": 1,
+            "maxProperties": 1,
             "properties": {
-                "legalName": {
+                "fullAddress": {
+                    "@id": "http://uri.suomi.fi/datamodel/ns/isa2core#fullAddress",
+                    "title": "Full address",
+                    "description": "The complete address written as a string. Use of this property is recommended as it will not suffer any misunderstandings that might arise through the breaking up of an address into its component parts. This property is analogous to vCards label property but with two important differences: (1) formatting is not assumed so that, unlike vCard label, it may not be suitable to print this on an address label, (2) vCards label property has a domain of vCard Address; the fullAddress property has no such restriction. The delimiter between address lines is semicolon \";\". Example: 'Testroad 11; 852 94 Sundsvall; Sweden'",
+                    "@type": "http://www.w3.org/2001/XMLSchema#string",
+                    "type": "string"
+                }
+            },
+            "required": [
+                "fullAddress"
+            ]
+        },
+        "Addresses": {
+            "title": "Addresses",
+            "type": "object",
+            "@id": "http://uri.suomi.fi/datamodel/ns/agent3#Addresses",
+            "description": "Addresses can be of different types, in this API we use both Registered Address and Postal Address. For both addresses, we use the attribute \"Full Address\".",
+            "properties": {
+                "postalAddress": {
+                    "@id": "http://uri.suomi.fi/datamodel/ns/isa2core#registeredAddress",
+                    "title": "Postal Address",
+                    "description": "The postal address is the address at which an agent wants to receive mail or other similar deliveries. For most companies the registered address is also the default postal address, but an agent can also declare a specific postal address separately.",
+                    "@type": "@id",
+                    "type": "object",
+                    "$ref": "#/definitions/Address"
+                }
+            }
+        },
+        "Agent": {
+            "title": "Agent",
+            "type": "object",
+            "@id": "http://uri.suomi.fi/datamodel/ns/ncdrm#Agent",
+            "description": "The Agent class represents both registered organizations (\"companies\") and persons who are doing business without being registered organizations, usually as sole traders (sole proprietors).",
+            "properties": {
+                "name": {
+                    "@id": "http://uri.suomi.fi/datamodel/ns/ncdrm#name",
+                    "title": "Name",
+                    "description": "The name of an agent, which can be a legal name for a registered organization or a full name for a person doing business as a sole trader.",
+                    "@type": "http://www.w3.org/2001/XMLSchema#string",
                     "type": "string"
                 },
-                "foundingDate": {
+                "registrationDate": {
+                    "@id": "http://uri.suomi.fi/datamodel/ns/ncdrm#registrationDate",
+                    "title": "Registration Date",
+                    "description": "The date when a national registration authority has registered the agent in the relevant registry. Response in format YYYY-MM-DD.",
+                    "@type": "http://www.w3.org/2001/XMLSchema#date",
                     "type": "string",
-                    "description": "ISO 8601 date"
+                    "format": "date"
                 },
-                "dissolutionDate": {
-                    "type": "string",
-                    "description": "ISO 8601 date"
+                "legalStatus": {
+                    "@id": "http://uri.suomi.fi/datamodel/ns/ncdrm#legalStatus",
+                    "title": "Legal Status",
+                    "description": "The nationally registered legal status of the agent. In the context of this model, the national values for legal status are mapped to the codes: * NO_REGISTERED - no extraordinary circumstances registered. The business register does not have anything registered but note that this doesn't say anything about for example financial status of the agent at this point in time. * SOME_REGISTERED - some extraordinary circumstances registered. The business register have registered information on for example bankruptcy. To know the exact nationally registered legal status you need to check that national register.",
+                    "enum": [
+                        "NO_REGISTERED",
+                        "SOME_REGISTERED"
+                    ],
+                    "@type": "http://www.w3.org/2001/XMLSchema#string",
+                    "type": "string"
                 },
-                "jurisdiction": {
-                    "type": "string",
-                    "description": "Three letter ISO 3166 (https://op.europa.eu/en/web/eu-vocabularies/dataset/-/resource?uri=http://publications.europa.eu/resource/dataset/country)"
+                "legalform": {
+                    "@id": "http://uri.suomi.fi/datamodel/ns/agent3#legalform",
+                    "title": "Legal form",
+                    "description": "The legal form of the agent.",
+                    "@type": "@id",
+                    "type": "object",
+                    "$ref": "#/definitions/LegalForm"
+                },
+                "addresses": {
+                    "@id": "http://uri.suomi.fi/datamodel/ns/isa2core#address",
+                    "title": "addresses",
+                    "description": "The addresses registered on the company.",
+                    "@type": "@id",
+                    "type": "object",
+                    "$ref": "#/definitions/Addresses"
+                },
+                "identifier": {
+                    "@id": "http://uri.suomi.fi/datamodel/ns/isa2core#identifierAs",
+                    "title": "identifier",
+                    "description": "Identifier identifies an Agent.",
+                    "@type": "@id",
+                    "type": "object",
+                    "$ref": "#/definitions/Identifier"
                 }
             },
             "required": [
-                "legalName",
-                "foundingDate"
+                "identifier",
+                "legalform",
+                "name",
+                "registrationDate",
+                "legalStatus"
             ]
         },
-        "Address": {
+        "Identifier": {
+            "title": "Identifier",
             "type": "object",
+            "@id": "http://uri.suomi.fi/datamodel/ns/ncdrm#Identifier",
+            "description": "Identifier is a structured reference that identifies an entity or in this model an agent.",
             "properties": {
-                "addressArea": {
-                    "type": "string",
-                    "description": "Part of a city, village or neighborhood."
+                "issuingAuthorityName": {
+                    "@id": "http://uri.suomi.fi/datamodel/ns/isa2core#issuingAuthorityName",
+                    "title": "Issuing authority name",
+                    "description": "The name of the authority that registered the agent.",
+                    "@type": "http://www.w3.org/2000/01/rdf-schema#Literal",
+                    "type": "string"
                 },
-                "postCode": {
-                    "type": "string",
-                    "description": "Postal code of the address."
-                },
-                "thoroughfare": {
-                    "type": "string",
-                    "description": "Street name and optionally number."
-                },
-                "locatorDesignator": {
-                    "type": "string",
-                    "description": "Street number and/or building name."
-                },
-                "postName": {
-                    "type": "string",
-                    "description": "Locality/City/Settlement of the address, free text."
-                },
-                "adminUnitL1": {
-                    "type": "string",
-                    "description": "Country of the address"
-                },
-                "adminUnitL2": {
-                    "type": "string",
-                    "description": "NUTS1 (Macroregion) of the address."
+                "notation": {
+                    "@id": "http://uri.suomi.fi/datamodel/ns/isa2core#notation",
+                    "title": "Notation",
+                    "description": "The attribute notation refers to a national organization number like \"5522334567\" for a Swedish registered agent. In case of \"-\" is included in the identifier like \"552233-4567\", that is not included in the response.",
+                    "@type": "http://www.w3.org/2000/01/rdf-schema#Literal",
+                    "type": "string"
                 }
             },
             "required": [
-                "thoroughfare",
-                "postName",
-                "postCode",
-                "adminUnitL1"
+                "issuingAuthorityName",
+                "notation"
             ]
+        },
+        "LegalForm": {
+            "title": "Legal form",
+            "type": "object",
+            "@id": "http://uri.suomi.fi/datamodel/ns/agent3#LegalForm",
+            "description": "Legal form of the agent.",
+            "properties": {
+                "code": {
+                    "@id": "http://uri.suomi.fi/datamodel/ns/isa2core#legalFormType",
+                    "title": "Code",
+                    "description": "The legal form code of an agent according to a national scheme based on national legislation. In this model the code is the nationally registered code with a country prefix. Example: \"SE_AB\".",
+                    "@type": "http://www.w3.org/2001/XMLSchema#string",
+                    "type": "string"
+                }
+            },
+            "required": [
+                "code"
+            ]
+        },
+        "langString": {
+            "type": "object",
+            "title": "Multilingual string",
+            "description": "Object type for localized strings",
+            "additionalProperties": {
+                "type": "string"
+            }
         }
-    },
-    "required": [
-        "Identifier",
-        "RegisteredOrganization",
-        "Address"
-    ]
+    }
 }

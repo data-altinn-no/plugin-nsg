@@ -1,6 +1,4 @@
-using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
@@ -76,31 +74,33 @@ public class Plugin
 
         var ci = new CompanyInformation
         {
-            Identifier = identifier,
-            RegisteredOrganization = new RegisteredOrganization
+            Identifier = new Identifier
             {
-                LegalName = unit.Navn,
-                Jurisdiction = "no"
-            }
-        };
+                Notation = organizationNumber,
+                IssuingAuthorityName = "Brønnøysundregistrene"
 
-        if (unit.Slettedato != DateTimeOffset.MinValue)
-        {
-            ci.RegisteredOrganization.DissolutionDate = unit.Slettedato.ToString("yyyy-MM-dd");
-            ci.Address = new Address();
-        }
-        else
-        {
-            // Only available on non-deleted units
-            ci.RegisteredOrganization.FoundingDate = unit.RegistreringsdatoEnhetsregisteret.ToString("yyyy-MM-dd");
-            ci.Address = new Address
+            },
+            Name = unit.Navn,
+            RegistrationDate = unit.RegistreringsdatoEnhetsregisteret,
+            LegalStatus = unit.UnderTvangsavviklingEllerTvangsopplosning || unit.UnderAvvikling || unit.Konkurs
+                ? LegalStatus.SomeRegistered
+                : LegalStatus.NoRegistered,
+            Legalform = new LegalForm
             {
-                Thoroughfare = string.Join("\n", unit.Forretningsadresse.Adresse),
-                PostCode = unit.Forretningsadresse.Postnummer,
-                PostName = unit.Forretningsadresse.Poststed,
-                AdminUnitL1 = unit.Forretningsadresse.Landkode.ToLowerInvariant()
-            };
-        }
+                Code = "NO_" + unit.Organisasjonsform.Kode
+            },
+            Addresses = new Addresses
+            {
+                PostalAddress = new PostalAddress
+                {
+                    FullAddress = string.Join(';', unit.Postadresse.Adresse)
+                                  + ';' + unit.Postadresse.Postnummer
+                                  + ';' + unit.Postadresse.Poststed
+                                  + ';' + CountryCodesHelper.GetByCode(unit.Postadresse.Landkode)
+                }
+            }
+
+        };
 
         return ci;
     }
@@ -117,29 +117,33 @@ public class Plugin
 
         var ci = new CompanyInformation
         {
-            Identifier = identifier,
-            RegisteredOrganization = new RegisteredOrganization
+            Identifier = new Identifier
             {
-                LegalName = unit.Name,
-                FoundingDate = unit.RegistrationDate.ToString("yyyy-MM-dd"),
-                Jurisdiction = "fi",
-            }
+                Notation = companyId,
+                IssuingAuthorityName = "Finnish Patent and Registration Office"
+            },
+            Name = unit.Name,
+            RegistrationDate = unit.RegistrationDate,
+            LegalStatus = liquidation == null ? LegalStatus.NoRegistered : LegalStatus.SomeRegistered,
+            Legalform = new LegalForm
+            {
+                Code = "FI_" + unit.CompanyForm
+            },
         };
 
         if (firstAddress != null)
         {
-            ci.Address = new Address
+            ci.Addresses = new Addresses()
             {
-                Thoroughfare = firstAddress.Street,
-                PostCode = firstAddress.PostCode.ToString(),
-                PostName = firstAddress.City,
-                AdminUnitL1 = firstAddress.Country ?? "fi" // always null in API?
+                PostalAddress = new PostalAddress
+                {
+                    FullAddress = (firstAddress.CareOf == null ? "" : (string)firstAddress.CareOf + ';')
+                                  + firstAddress.Street
+                                  + ';' + firstAddress.PostCode
+                                  + ';' + firstAddress.City
+                                  + ';' + firstAddress.Language
+                }
             };
-        }
-
-        if (liquidation?.RegistrationDate != null)
-        {
-            ci.RegisteredOrganization.DissolutionDate = liquidation.RegistrationDate.Value.ToString("yyyy-MM-dd");
         }
 
         return ci;
