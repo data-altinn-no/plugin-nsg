@@ -45,6 +45,7 @@ public class CompanyInformation
     /// register.
     /// </summary>
     [JsonProperty("legalStatus")]
+    [JsonConverter(typeof(LegalStatusConverter))]
     public LegalStatus LegalStatus { get; set; }
 
     /// <summary>
@@ -162,23 +163,6 @@ public class LegalForm
 /// </summary>
 public enum LegalStatus { NoRegistered, SomeRegistered };
 
-internal static class Converter
-{
-    public static readonly JsonSerializerSettings Settings = new JsonSerializerSettings
-    {
-        MetadataPropertyHandling = MetadataPropertyHandling.Ignore,
-        DateParseHandling = DateParseHandling.None,
-        Converters =
-        {
-            LegalStatusConverter.Instance,
-            new IsoDateTimeConverter
-            {
-                DateTimeStyles = DateTimeStyles.AssumeUniversal
-            }
-        },
-    };
-}
-
 internal class DateFormatConverter : IsoDateTimeConverter
 {
     public DateFormatConverter(string format)
@@ -224,6 +208,4 @@ internal class LegalStatusConverter : JsonConverter
         }
         throw new Exception("Cannot marshal type LegalStatus");
     }
-
-    public static readonly LegalStatusConverter Instance = new LegalStatusConverter();
 }

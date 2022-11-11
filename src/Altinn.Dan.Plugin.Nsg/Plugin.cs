@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
@@ -68,16 +69,21 @@ public class Plugin
 
     private async Task<CompanyInformation> GetFromNorway(string organizationNumber, string identifier)
     {
-        // TODO! Underenheter
         var url = "https://data.brreg.no/enhetsregisteret/api/enheter/" + organizationNumber;
         var unit = await MakeRequest<NorUnit>(url);
+
+        if (unit.Slettedato != DateTimeOffset.MinValue)
+        {
+            throw new EvidenceSourcePermanentClientException(
+                EvidenceSourceMetadata.ErrorOrganizationNotFound, "Upstream source could not find provided company-id");
+        }
 
         var ci = new CompanyInformation
         {
             Identifier = new Identifier
             {
                 Notation = organizationNumber,
-                IssuingAuthorityName = "Brønnøysundregistrene"
+                IssuingAuthorityName = "The Brønnøysund Register Centre"
 
             },
             Name = unit.Navn,
@@ -88,8 +94,12 @@ public class Plugin
             Legalform = new LegalForm
             {
                 Code = "NO_" + unit.Organisasjonsform.Kode
-            },
-            Addresses = new Addresses
+            }
+        };
+
+        if (unit.Postadresse != null)
+        {
+            ci.Addresses = new Addresses
             {
                 PostalAddress = new PostalAddress
                 {
@@ -98,9 +108,8 @@ public class Plugin
                                   + ';' + unit.Postadresse.Poststed
                                   + ';' + CountryCodesHelper.GetByCode(unit.Postadresse.Landkode)
                 }
-            }
-
-        };
+            };
+        }
 
         return ci;
     }
