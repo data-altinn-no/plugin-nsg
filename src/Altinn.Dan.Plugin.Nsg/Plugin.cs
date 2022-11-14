@@ -120,7 +120,7 @@ public class Plugin
         var results = await MakeRequest<FinUnit>(url);
         var unit = results.Results[0];
         var sortedAdresses = unit.Addresses.OrderByDescending(x => x.RegistrationDate);
-        var firstAddress = sortedAdresses.FirstOrDefault(x => !x.EndDate.HasValue);
+        var firstAddress = sortedAdresses.FirstOrDefault(x => !x.EndDate.HasValue && x.Type == 1 /* street address */);
         var liquidations = unit.Liquidations?.OrderByDescending(x => x.RegistrationDate);
         var liquidation = liquidations?.FirstOrDefault();
 
