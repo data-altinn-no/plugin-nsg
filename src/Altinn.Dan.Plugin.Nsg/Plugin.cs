@@ -97,16 +97,16 @@ public class Plugin
             }
         };
 
-        if (unit.Postadresse != null)
+        if (unit.Forretningsadresse != null)
         {
             ci.Addresses = new Addresses
             {
                 PostalAddress = new PostalAddress
                 {
-                    FullAddress = string.Join(';', unit.Postadresse.Adresse)
-                                  + ';' + unit.Postadresse.Postnummer
-                                  + ';' + unit.Postadresse.Poststed
-                                  + ';' + CountryCodesHelper.GetByCode(unit.Postadresse.Landkode)
+                    FullAddress = string.Join(';', unit.Forretningsadresse.Adresse)
+                                  + ';' + unit.Forretningsadresse.Postnummer
+                                  + ';' + unit.Forretningsadresse.Poststed
+                                  + ';' + CountryCodesHelper.GetByCode(unit.Forretningsadresse.Landkode)
                 }
             };
         }
