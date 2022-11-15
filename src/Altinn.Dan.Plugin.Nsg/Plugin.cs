@@ -22,10 +22,12 @@ public class Plugin
 {
     private readonly HttpClient _client;
     private readonly IEvidenceSourceMetadata _evidenceSourceMetadata;
+    private readonly IEntityRegistryService _entityRegistryService;
 
-    public Plugin(IHttpClientFactory httpClientFactory, IEvidenceSourceMetadata evidenceSourceMetadata)
+    public Plugin(IHttpClientFactory httpClientFactory, IEvidenceSourceMetadata evidenceSourceMetadata, IEntityRegistryService entityRegistryService)
     {
         _evidenceSourceMetadata = evidenceSourceMetadata;
+        _entityRegistryService = entityRegistryService;
         _client = httpClientFactory.CreateClient(Constants.SafeHttpClient);
     }
 
@@ -43,7 +45,7 @@ public class Plugin
     {
         CompanyInformation companyInformation = await GetCompanyInformation(evidenceHarvesterRequest.OrganizationNumber);
         var ecb = new EvidenceBuilder(_evidenceSourceMetadata, "NsgCompanyBasicInformation");
-        ecb.AddEvidenceValue("default", JsonConvert.SerializeObject(companyInformation), EvidenceSourceMetadata.Source);
+        ecb.AddEvidenceValue("default", JsonConvert.SerializeObject(companyInformation, Converter.Settings), EvidenceSourceMetadata.Source);
 
         return ecb.GetEvidenceValues();
     }
@@ -72,6 +74,8 @@ public class Plugin
         var url = "https://data.brreg.no/enhetsregisteret/api/enheter/" + organizationNumber;
         var unit = await MakeRequest<NorUnit>(url);
 
+        //var unit = await _entityRegistryService.GetFull(organizationNumber, attemptSubUnitLookupIfNotFound: false);
+
         if (unit.Slettedato != DateTimeOffset.MinValue)
         {
             throw new EvidenceSourcePermanentClientException(
@@ -93,21 +97,31 @@ public class Plugin
                 : LegalStatus.NoRegistered,
             Legalform = new LegalForm
             {
-                Code = "NO_" + unit.Organisasjonsform.Kode
-            }
+                Code = GetLegalBasisEnumValue("NO_" + unit.Organisasjonsform.Kode),
+                Type = unit.Organisasjonsform.Beskrivelse,
+            },
+            Addresses = new Addresses()
         };
+
+        if (unit.Postadresse != null)
+        {
+            ci.Addresses.PostalAddress = new PostalAddress
+            {
+                FullAddress = string.Join(';', unit.Postadresse.Adresse)
+                              + ';' + unit.Postadresse.Postnummer
+                              + ';' + unit.Postadresse.Poststed
+                              + ';' + CountryCodesHelper.GetByCode(unit.Postadresse.Landkode)
+            };
+        }
 
         if (unit.Forretningsadresse != null)
         {
-            ci.Addresses = new Addresses
+            ci.Addresses.RegisteredAddress = new RegisteredAddress()
             {
-                PostalAddress = new PostalAddress
-                {
-                    FullAddress = string.Join(';', unit.Forretningsadresse.Adresse)
-                                  + ';' + unit.Forretningsadresse.Postnummer
-                                  + ';' + unit.Forretningsadresse.Poststed
-                                  + ';' + CountryCodesHelper.GetByCode(unit.Forretningsadresse.Landkode)
-                }
+                FullAddress = string.Join(';', unit.Forretningsadresse.Adresse)
+                              + ';' + unit.Forretningsadresse.Postnummer
+                              + ';' + unit.Forretningsadresse.Poststed
+                              + ';' + CountryCodesHelper.GetByCode(unit.Forretningsadresse.Landkode)
             };
         }
 
@@ -120,7 +134,8 @@ public class Plugin
         var results = await MakeRequest<FinUnit>(url);
         var unit = results.Results[0];
         var sortedAdresses = unit.Addresses.OrderByDescending(x => x.RegistrationDate);
-        var firstAddress = sortedAdresses.FirstOrDefault(x => !x.EndDate.HasValue && x.Type == 1 /* street address */);
+        var firstRegisteredAddress = sortedAdresses.FirstOrDefault(x => !x.EndDate.HasValue && x.Type == 1 /* street address */);
+        var firstPostalAddress = sortedAdresses.FirstOrDefault(x => !x.EndDate.HasValue && x.Type == 2 /* postal address */);
         var liquidations = unit.Liquidations?.OrderByDescending(x => x.RegistrationDate);
         var liquidation = liquidations?.FirstOrDefault();
 
@@ -136,26 +151,53 @@ public class Plugin
             LegalStatus = liquidation == null ? LegalStatus.NoRegistered : LegalStatus.SomeRegistered,
             Legalform = new LegalForm
             {
-                Code = "FI_" + unit.CompanyForm
+                Code = GetLegalBasisEnumValue("FI_" + unit.CompanyForm)
             },
+            Addresses = new Addresses()
         };
 
-        if (firstAddress != null)
+        if (firstPostalAddress != null)
         {
-            ci.Addresses = new Addresses()
+            ci.Addresses.PostalAddress = new PostalAddress()
             {
-                PostalAddress = new PostalAddress
-                {
-                    FullAddress = (firstAddress.CareOf == null ? "" : (string)firstAddress.CareOf + ';')
-                                  + firstAddress.Street
-                                  + ';' + firstAddress.PostCode
-                                  + ';' + firstAddress.City
-                                  + ';' + firstAddress.Language
-                }
+                FullAddress = (firstPostalAddress.CareOf == null ? "" : (string)firstPostalAddress.CareOf + ';')
+                              + firstPostalAddress.Street
+                              + ';' + firstPostalAddress.PostCode
+                              + ';' + firstPostalAddress.City
+                              + ';' + firstPostalAddress.Language
             };
         }
 
+        if (firstRegisteredAddress != null)
+        {
+            ci.Addresses.RegisteredAddress = new RegisteredAddress()
+            {
+                FullAddress = (firstRegisteredAddress.CareOf == null ? "" : (string)firstRegisteredAddress.CareOf + ';')
+                              + firstRegisteredAddress.Street
+                              + ';' + firstRegisteredAddress.PostCode
+                              + ';' + firstRegisteredAddress.City
+                              + ';' + firstRegisteredAddress.Language
+            };
+        }
+
+
+
         return ci;
+    }
+
+    private Code GetLegalBasisEnumValue(string unitCompanyForm)
+    {
+        var json = "{\"legalForm\":{\"code\":\"" + unitCompanyForm + "\"}}";
+        try
+        {
+            var ci = JsonConvert.DeserializeObject<CompanyInformation>(json, Converter.Settings)!;
+            return ci.Legalform.Code;
+        }
+        catch (Exception)
+        {
+            throw new EvidenceSourcePermanentServerException(EvidenceSourceMetadata.ErrorUpstreamError,
+                "Unable to recognize legalForm.Code '" + unitCompanyForm + "'");
+        }
     }
 
     private async Task<T> MakeRequest<T>(string target)
