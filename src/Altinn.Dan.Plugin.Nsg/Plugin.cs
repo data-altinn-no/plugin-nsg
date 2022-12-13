@@ -72,7 +72,7 @@ public class Plugin
     {
         var unit = await _entityRegistryService.GetFull(organizationNumber, attemptSubUnitLookupIfNotFound: false);
 
-        if (unit is null || unit.Slettedato != DateTime.MinValue)
+        if (unit is null || unit.Slettedato is not null)
         {
             throw new EvidenceSourcePermanentClientException(
                 EvidenceSourceMetadata.ErrorOrganizationNotFound, "Upstream source could not find provided company-id");
