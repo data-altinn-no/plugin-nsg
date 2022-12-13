@@ -13,7 +13,6 @@ using Dan.Common.Util;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Newtonsoft.Json;
-using NorUnit = Altinn.Dan.Plugin.Nsg.Models.NOR.Unit;
 using FinUnit = Altinn.Dan.Plugin.Nsg.Models.FIN.Unit;
 
 namespace Altinn.Dan.Plugin.Nsg;
@@ -71,12 +70,9 @@ public class Plugin
 
     private async Task<CompanyInformation> GetFromNorway(string organizationNumber, string identifier)
     {
-        var url = "https://data.brreg.no/enhetsregisteret/api/enheter/" + organizationNumber;
-        var unit = await MakeRequest<NorUnit>(url);
+        var unit = await _entityRegistryService.GetFull(organizationNumber, attemptSubUnitLookupIfNotFound: false);
 
-        //var unit = await _entityRegistryService.GetFull(organizationNumber, attemptSubUnitLookupIfNotFound: false);
-
-        if (unit.Slettedato != DateTimeOffset.MinValue)
+        if (unit is null || unit.Slettedato != DateTime.MinValue)
         {
             throw new EvidenceSourcePermanentClientException(
                 EvidenceSourceMetadata.ErrorOrganizationNotFound, "Upstream source could not find provided company-id");
@@ -91,8 +87,8 @@ public class Plugin
 
             },
             Name = unit.Navn,
-            RegistrationDate = unit.RegistreringsdatoEnhetsregisteret,
-            LegalStatus = unit.UnderTvangsavviklingEllerTvangsopplosning || unit.UnderAvvikling || unit.Konkurs
+            RegistrationDate = (DateTimeOffset)unit.RegistreringsdatoEnhetsregisteret!,
+            LegalStatus = unit.UnderTvangsavviklingEllerTvangsopplosning!.Value || unit.UnderAvvikling!.Value || unit.Konkurs!.Value
                 ? LegalStatus.SomeRegistered
                 : LegalStatus.NoRegistered,
             Legalform = new LegalForm

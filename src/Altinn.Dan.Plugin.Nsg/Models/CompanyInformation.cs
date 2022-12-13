@@ -60,6 +60,7 @@ namespace Altinn.Dan.Plugin.Nsg.Models
         /// registry. Response in format YYYY-MM-DD.
         /// </summary>
         [JsonProperty("registrationDate")]
+        [JsonConverter(typeof(DateFormatConverter), "yyyy-MM-dd")]
         public DateTimeOffset RegistrationDate { get; set; }
     }
 
