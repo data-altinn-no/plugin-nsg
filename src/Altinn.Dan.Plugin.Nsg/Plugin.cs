@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Altinn.Dan.Plugin.Nsg.Models;
 using Dan.Common;
@@ -70,12 +71,18 @@ public class Plugin
 
     private async Task<CompanyInformation> GetFromNorway(string organizationNumber, string identifier)
     {
+        if (!Regex.IsMatch(organizationNumber, @"^\d{9}$"))
+        {
+            throw new EvidenceSourcePermanentClientException(
+                EvidenceSourceMetadata.ErrorInvalidInput, "Invalid company-id");
+        }
+
         var unit = await _entityRegistryService.GetFull(organizationNumber, attemptSubUnitLookupIfNotFound: false);
 
         if (unit is null || unit.Slettedato is not null)
         {
             throw new EvidenceSourcePermanentClientException(
-                EvidenceSourceMetadata.ErrorOrganizationNotFound, "Upstream source could not find provided company-id");
+                EvidenceSourceMetadata.ErrorOrganizationNotFound, "Could not find provided company-id");
         }
 
         var ci = new CompanyInformation
