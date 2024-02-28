@@ -9,12 +9,14 @@ using System.Threading.Tasks;
 using Altinn.Dan.Plugin.Nsg.Config;
 using Altinn.Dan.Plugin.Nsg.Models;
 using Altinn.Dan.Plugin.Nsg.RegisteredInformation.Models;
+using Azure.Core;
 using Dan.Common;
 using Dan.Common.Exceptions;
 using Dan.Common.Interfaces;
 using Dan.Common.Models;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Newtonsoft.Json;
 using Identifier = Altinn.Dan.Plugin.Nsg.RegisteredInformation.Models.Identifier;
@@ -28,13 +30,15 @@ namespace Altinn.Dan.Plugin.Nsg
         private readonly IEvidenceSourceMetadata _evidenceSourceMetadata;
         private readonly IEntityRegistryService _entityRegistryService;
         private readonly ApplicationSettings _settings;
+        private readonly ILogger _logger;
 
-        public NSGv1(IHttpClientFactory httpClientFactory, IEvidenceSourceMetadata evidenceSourceMetadata, IEntityRegistryService entityRegistryService, IOptions<ApplicationSettings> settings)
+        public NSGv1(IHttpClientFactory httpClientFactory, IEvidenceSourceMetadata evidenceSourceMetadata, IEntityRegistryService entityRegistryService, IOptions<ApplicationSettings> settings, ILoggerFactory loggerFactory)
         {
             _evidenceSourceMetadata = evidenceSourceMetadata;
             _entityRegistryService = entityRegistryService;
             _client = httpClientFactory.CreateClient(Constants.SafeHttpClient);
             _settings = settings.Value;
+            _logger = loggerFactory.CreateLogger<NSGv1>();
         }
 
         [Function("Is-Alive")]
@@ -57,6 +61,10 @@ namespace Altinn.Dan.Plugin.Nsg
         public async Task<HttpResponseData> RegisteredInformation(
             [HttpTrigger(AuthorizationLevel.Function, "post", Route = null)] HttpRequestData req)
         {
+            var requestHeader = req.Headers.GetValues("x-request-id").FirstOrDefault();
+            requestHeader = string.IsNullOrEmpty(requestHeader) ? "NOT SET" : requestHeader;
+            _logger.LogInformation($"registered-organisations called with custom header {requestHeader}");
+
             var input = await req.ReadFromJsonAsync<RegisteredInformationRequest>();
             var info = await GetRegisteredInformation(input);
 
@@ -179,9 +187,9 @@ namespace Altinn.Dan.Plugin.Nsg
                     notation = unit.Organisasjonsnummer
                 };
                 response.legalStatus = new Legalstatus();
-                response.legalStatus.code = unit.UnderTvangsavviklingEllerTvangsopplosning!.Value || unit.UnderAvvikling!.Value || unit.Konkurs!.Value
-                    ? "NONE"
-                    : "SOME";
+                response.legalStatus.code = unit.UnderTvangsavviklingEllerTvangsopplosning.Value || unit.UnderAvvikling!.Value || unit.Konkurs!.Value
+                    ? "SOME"
+                    : "NONE";
                 response.legalStatus.name = response.legalStatus.code == "NONE"
                         ? "No extraordinary circumstances registered"
                         : "Some extraordinary circumstances registered";
