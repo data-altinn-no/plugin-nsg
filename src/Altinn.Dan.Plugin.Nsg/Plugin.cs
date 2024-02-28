@@ -1,10 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Net;
-using System.Net.Http;
-using System.Text.RegularExpressions;
-using System.Threading.Tasks;
 using Altinn.Dan.Plugin.Nsg.Models;
 using Dan.Common;
 using Dan.Common.Exceptions;
@@ -14,7 +7,15 @@ using Dan.Common.Util;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Newtonsoft.Json;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Net;
+using System.Net.Http;
+using System.Text.RegularExpressions;
+using System.Threading.Tasks;
 using FinUnit = Altinn.Dan.Plugin.Nsg.Models.FIN.Unit;
+using Identifier = Altinn.Dan.Plugin.Nsg.Models.Identifier;
 
 namespace Altinn.Dan.Plugin.Nsg;
 
@@ -40,6 +41,9 @@ public class Plugin
         return await EvidenceSourceResponse.CreateResponse(req,
             () => GetNsgCompanyBasicInformationDatasetName(evidenceHarvesterRequest));
     }
+
+
+ 
 
     private async Task<List<EvidenceValue>> GetNsgCompanyBasicInformationDatasetName(EvidenceHarvesterRequest evidenceHarvesterRequest)
     {
