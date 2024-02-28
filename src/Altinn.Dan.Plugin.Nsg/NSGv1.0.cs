@@ -53,7 +53,7 @@ namespace Altinn.Dan.Plugin.Nsg
             }
         }
 
-        [Function("registered-information")]
+        [Function("registered-organisations")]
         public async Task<HttpResponseData> RegisteredInformation(
             [HttpTrigger(AuthorizationLevel.Function, "post", Route = null)] HttpRequestData req)
         {
