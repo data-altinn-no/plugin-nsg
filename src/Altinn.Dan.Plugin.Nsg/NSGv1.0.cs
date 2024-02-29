@@ -158,7 +158,7 @@ namespace Altinn.Dan.Plugin.Nsg
                         code = unit.Naeringskode1.Kode.Replace(".", "").Substring(0, 4),
                         sequence = 1,
                         inClassification = "http://data.europa.eu/ux2/nace2/nace2",
-                        reference = "http://data.europa.eu/ux2/nace2/5020",
+                        reference = $"http://data.europa.eu/ux2/nace2/{unit.Naeringskode1.Kode.Replace(".", "").Substring(0, 4)}",
                     });
 
                 if (unit.Naeringskode2 != null)
@@ -168,7 +168,7 @@ namespace Altinn.Dan.Plugin.Nsg
                             code = unit.Naeringskode2.Kode.Replace(".", "").Substring(0, 4),
                             sequence = 2,
                             inClassification = "http://data.europa.eu/ux2/nace2/nace2",
-                            reference = "http://data.europa.eu/ux2/nace2/5020",
+                            reference = $"http://data.europa.eu/ux2/nace2/{unit.Naeringskode2.Kode.Replace(".", "").Substring(0, 4)}",
                         });
 
                 if (unit.Naeringskode3 != null)
@@ -178,7 +178,7 @@ namespace Altinn.Dan.Plugin.Nsg
                             code = unit.Naeringskode3.Kode.Replace(".", "").Substring(0, 4),
                             sequence = 3,
                             inClassification = "http://data.europa.eu/ux2/nace2/nace2",
-                            reference = "http://data.europa.eu/ux2/nace2/5020",
+                            reference = $"http://data.europa.eu/ux2/nace2/{unit.Naeringskode3.Kode.Replace(".", "").Substring(0, 4)}",
                         });
         
                 response.identifier = new Identifier()
