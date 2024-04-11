@@ -33,7 +33,7 @@ namespace Altinn.Dan.Plugin.Nsg.Config
                 }
                 else
                 {
-                    throw new EvidenceSourcePermanentClientException(1,"Invalid country code");
+                    throw new EvidenceSourcePermanentClientException(1,"Invalid Country code");
                 }
             }
         }
@@ -47,5 +47,15 @@ namespace Altinn.Dan.Plugin.Nsg.Config
         public string RegisteredInformationUrlDE { get; set; }
 
         public string RegisteredInformationUrlIS { get; set; }
+
+        public string ClientSecretSE { get; set; }
+
+        public string ClientIdSE { get; set; }
+
+        public string ScopeSE { get; set; }
+
+        public string TokenUrlSE { get; set; }
+
+        public bool TokenCaching { get; set; }
     }
 }

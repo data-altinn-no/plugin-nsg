@@ -1,64 +1,100 @@
+using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Altinn.Dan.Plugin.Nsg.RegisteredInformation.Models
+namespace Altinn.Dan.Plugin.Nsg.Models.RegisteredInformation
 {
     public class RegisteredInformationRequest
     {
-        public string country { get; set; }
-        public string organisationNumber { get; set; }
+        [JsonProperty("country", Required = Required.Default, DefaultValueHandling = DefaultValueHandling.Ignore)]
+        public string Country { get; set; }
+        [JsonProperty("notation")]
+        public string Notation { get; set; }
     }
 
 
     public class RegisteredInformationResponse
     {
+        [JsonProperty("activity")]
         public List<Activity> activity { get; set; }
-        public Identifier identifier { get; set; }
-        public Legalform legalForm { get; set; }
-        public Legalstatus legalStatus { get; set; }
-        public string name { get; set; }
-        public Postaladdress postalAddress { get; set; }
-        public Registeredaddress registeredAddress { get; set; }
-        public DateTime registrationDate { get; set; }
+
+        [JsonProperty("identifier")]
+        public Identifier Identifier { get; set; }
+
+        [JsonProperty("legalform")]
+        public Legalform LegalForm { get; set; }
+
+        [JsonProperty("legalStatus")]
+        public Legalstatus LegalStatus { get; set; }
+
+        [JsonProperty("name")]
+        public string Name { get; set; }
+
+        [JsonProperty("postalAddress")]
+        public Postaladdress PostalAddress { get; set; }
+
+        [JsonProperty("registeredAddress")]
+        public Registeredaddress RegisteredAddress { get; set; }
+
+        [JsonProperty("registrationDate")]
+        public DateTime RegistrationDate { get; set; }
+
     }
 
     public class Identifier
     {
-        public string issuingAuthorityName { get; set; }
-        public string notation { get; set; }
+        [JsonProperty("issuingAuthorityName")]
+        public string IssuingAuthorityName { get; set; }
+
+        [JsonProperty("notation")]
+        public string Notation { get; set; }
     }
 
     public class Legalform
     {
-        public string code { get; set; }
-        public string name { get; set; }
+        [JsonProperty("code")]
+        public string Code { get; set; }
+        [JsonProperty("name")]
+        public string Name { get; set; }
     }
 
     public class Legalstatus
     {
-        public string code { get; set; }
-        public string name { get; set; }
+        [JsonProperty("code")]
+        public string Code { get; set; }
+
+        [JsonProperty("name")]
+        public string Name { get; set; }
     }
 
     public class Postaladdress
     {
-        public string fullAddress { get; set; }
+        [JsonProperty("fullAddress")]
+        public string FullAddress { get; set; }
     }
 
     public class Registeredaddress
     {
-        public string fullAddress { get; set; }
+        [JsonProperty("fullAddress")]
+        public string FullAddress { get; set; }
     }
 
     public class Activity
     {
+        [JsonProperty("code")]
         public string code { get; set; }
-        public string inClassification { get; set; }
-        public string reference { get; set; }
-        public int sequence { get; set; }
+
+        [JsonProperty("inClassification")]
+        public string InClassification { get; set; }
+
+        [JsonProperty("reference")]
+        public string Reference { get; set; }
+
+        [JsonProperty("sequence")]
+        public int Sequence { get; set; }
     }
 
 }

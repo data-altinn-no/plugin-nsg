@@ -98,7 +98,7 @@ namespace Altinn.Dan.Plugin.Nsg.Models
     /// data type: Representation of an address spatial object for use in external application
     /// schemas that need to include the basic, address information in a readable way.
     ///
-    /// The representation of Addresses varies widely from one country's postal system to
+    /// The representation of Addresses varies widely from one Country's postal system to
     /// another. Even within countries, there are almost always examples of Addresses that do not
     /// conform to the stated national standard. However, ISO 19160-1 provides a method through
     /// which different Addresses can be converted from one conceptual model to another.
@@ -134,7 +134,7 @@ namespace Altinn.Dan.Plugin.Nsg.Models
     /// data type: Representation of an address spatial object for use in external application
     /// schemas that need to include the basic, address information in a readable way.
     ///
-    /// The representation of Addresses varies widely from one country's postal system to
+    /// The representation of Addresses varies widely from one Country's postal system to
     /// another. Even within countries, there are almost always examples of Addresses that do not
     /// conform to the stated national standard. However, ISO 19160-1 provides a method through
     /// which different Addresses can be converted from one conceptual model to another.
@@ -171,11 +171,11 @@ namespace Altinn.Dan.Plugin.Nsg.Models
         public string IssuingAuthorityName { get; set; }
 
         /// <summary>
-        /// The attribute notation refers to a national organization number like "5522334567" for a
+        /// The attribute Notation refers to a national organization number like "5522334567" for a
         /// Swedish registered agent. In case of "-" is included in the identifier like
         /// "552233-4567", that is not included in the response.
         /// </summary>
-        [JsonProperty("notation")]
+        [JsonProperty("Notation")]
         public string Notation { get; set; }
     }
 
@@ -188,7 +188,7 @@ namespace Altinn.Dan.Plugin.Nsg.Models
     {
         /// <summary>
         /// The legal form code of an agent according to a national scheme based on national
-        /// legislation. In this model the code is the nationally registered code with a country
+        /// legislation. In this model the code is the nationally registered code with a Country
         /// prefix. Example: "SE_AB".
         /// </summary>
         [JsonProperty("code")]
@@ -216,7 +216,7 @@ namespace Altinn.Dan.Plugin.Nsg.Models
 
     /// <summary>
     /// The legal form code of an agent according to a national scheme based on national
-    /// legislation. In this model the code is the nationally registered code with a country
+    /// legislation. In this model the code is the nationally registered code with a Country
     /// prefix. Example: "SE_AB".
     /// </summary>
     public enum Code { FiAhve, FiAhvell, FiAoy, FiAsh, FiAsy, FiAy, FiAyh, FiElsyh, FiEsaa, FiEts, FiEty, FiEuokkt, FiEvl, FiEvlut, FiEyht, FiHyyh, FiKk, FiKonk, FiKoy, FiKp, FiKunt, FiKuntll, FiKuntlll, FiKuntyht, FiKvakyh, FiKvj, FiKvy, FiKy, FiLiy, FiMhy, FiMjuo, FiMohlo, FiMsaa, FiMtyh, FiMuu, FiMuukoy, FiMuve, FiMuyp, FiMyh, FiOk, FiOp, FiOrto, FiOy, FiOyj, FiPk, FiPy, FiSaa, FiSce, FiScp, FiSe, FiSl, FiSp, FiTeka, FiTyh, FiTyka, FiUlko, FiUyk, FiVakk, FiValt, FiValtll, FiVeyht, FiVoj, FiVoy, FiVy, FiYeh, FiYhme, FiYhte, FiYo, NoAafy, NoAdos, NoAnna, NoAns, NoAs, NoAsa, NoBa, NoBbl, NoBedr, NoBo, NoBrl, NoDa, NoEnk, NoEoefg, NoEsek, NoFkf, NoFli, NoFylk, NoGfs, NoIkjp, NoIks, NoKbo, NoKf, NoKirk, NoKomm, NoKs, NoKtrf, NoNuf, NoOpmv, NoOrgl, NoPers, NoPk, NoPre, NoSa, NoSaer, NoSam, NoSe, NoSf, NoSpa, NoStat, NoSti, NoTvam, NoVpfo, SeAb, SeBab, SeBf, SeBfl, SeBrf, SeE, SeEb, SeEeig, SeEgts, SeEk, SeFab, SeFl, SeFof, SeHb, SeI, SeKb, SeKhf, SeMb, SeOfb, SeS, SeSb, SeSce, SeSe, SeSf, SeTsf };

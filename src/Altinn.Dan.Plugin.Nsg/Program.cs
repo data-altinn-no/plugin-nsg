@@ -1,7 +1,9 @@
-using Altinn.Dan.Plugin.Nsg;
-using Microsoft.Extensions.Hosting;
+using Altinn.Dan.Plugin.Nsg.Config;
+using Altinn.Dan.Plugin.Nsg.Models;
 using Dan.Common.Extensions;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 
 var host = new HostBuilder()
     .ConfigureDanPluginDefaults()
@@ -13,11 +15,11 @@ var host = new HostBuilder()
     .ConfigureServices((context, services) =>
     {
         // Add any additional services here
+        services.AddMemoryCache();
+        services.AddSingleton<ITokenCacheProvider, MemoryTokenCacheProvider>();
 
-        // This makes IOption<Settings> available in the DI container.
-        var configurationRoot = context.Configuration;
-        services.Configure<Settings>(
-            configurationRoot.GetSection(nameof(Settings)));
+        services.AddOptions<ApplicationSettings>()
+            .Configure<IConfiguration>((settings, configuration) => configuration.Bind(settings));
     })
     .Build();
 

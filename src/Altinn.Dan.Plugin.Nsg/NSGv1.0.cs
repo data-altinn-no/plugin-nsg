@@ -1,60 +1,54 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Net;
-using System.Net.Http;
-using System.Text;
-using System.Text.RegularExpressions;
-using System.Threading.Tasks;
 using Altinn.Dan.Plugin.Nsg.Config;
+using Altinn.Dan.Plugin.Nsg.Exceptions;
 using Altinn.Dan.Plugin.Nsg.Models;
-using Altinn.Dan.Plugin.Nsg.RegisteredInformation.Models;
-using Azure.Core;
+using Altinn.Dan.Plugin.Nsg.Models.RegisteredInformation;
 using Dan.Common;
 using Dan.Common.Exceptions;
 using Dan.Common.Interfaces;
-using Dan.Common.Models;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Newtonsoft.Json;
-using Identifier = Altinn.Dan.Plugin.Nsg.RegisteredInformation.Models.Identifier;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Net;
+using System.Net.Http;
+using System.Net.Http.Headers;
+using System.Text;
+using System.Text.RegularExpressions;
+using System.Threading.Tasks;
+using Identifier = Altinn.Dan.Plugin.Nsg.Models.RegisteredInformation.Identifier;
 
 namespace Altinn.Dan.Plugin.Nsg
 {
     public class NSGv1
     {
-
         private readonly HttpClient _client;
-        private readonly IEvidenceSourceMetadata _evidenceSourceMetadata;
         private readonly IEntityRegistryService _entityRegistryService;
         private readonly ApplicationSettings _settings;
         private readonly ILogger _logger;
+        private readonly ITokenCacheProvider _tokenCacheProvider;
 
-        public NSGv1(IHttpClientFactory httpClientFactory, IEvidenceSourceMetadata evidenceSourceMetadata, IEntityRegistryService entityRegistryService, IOptions<ApplicationSettings> settings, ILoggerFactory loggerFactory)
+        public NSGv1(IHttpClientFactory httpClientFactory, IEntityRegistryService entityRegistryService, IOptions<ApplicationSettings> settings, ILoggerFactory loggerFactory, ITokenCacheProvider tokenCacheProvider)
         {
-            _evidenceSourceMetadata = evidenceSourceMetadata;
             _entityRegistryService = entityRegistryService;
             _client = httpClientFactory.CreateClient(Constants.SafeHttpClient);
             _settings = settings.Value;
             _logger = loggerFactory.CreateLogger<NSGv1>();
+            _tokenCacheProvider = tokenCacheProvider;
         }
 
         [Function("Is-Alive")]
-        public HttpResponseData CheckIsAlive(
+        public async Task<HttpResponseData> CheckIsAlive(
             [HttpTrigger(AuthorizationLevel.Function, "get", Route = null)] HttpRequestData req)
         {
-            bool isAlive = true;
-
-            if (isAlive)
-            {
+            if (await _entityRegistryService.IsMainUnit("985619433"))
                 return req.CreateResponse(HttpStatusCode.OK);
-            }
             else
-            {
                 return req.CreateResponse(HttpStatusCode.InternalServerError);
-            }
+            
         }
 
         [Function("registered-organisations")]
@@ -66,25 +60,48 @@ namespace Altinn.Dan.Plugin.Nsg
             _logger.LogInformation($"registered-organisations called with custom header {requestHeader}");
 
             var input = await req.ReadFromJsonAsync<RegisteredInformationRequest>();
-            var info = await GetRegisteredInformation(input);
+            input.Notation = new string(input.Notation.Where(c => char.IsDigit(c)).ToArray());
+            try
+            {
+                var info = await GetRegisteredInformation(input, requestHeader);
+                var response = req.CreateResponse();
+                await response.WriteAsJsonAsync(info);
+                return response;
+            }
+            catch (NsgException ex)
+            {
+                var errorResponse = new NSGErrorModel()
+                    {
+                        code = ex.ErrorCode,
+                        detail = ex.ErrorDetail,
+                        instance = ex.ErrorInstance,
+                        requestId = requestHeader,
+                        source = ex.ErrorSource,
+                        status = ex.ErrorStatus,
+                        timestamp = DateTime.Now.ToUniversalTime(),
+                        title = ex.ErrorTitle,
+                        type = ex.ErrorType
+                    };
 
-            var response = req.CreateResponse();
-            await response.WriteAsJsonAsync(info);
-            return response;
+                    var response = req.CreateResponse();
+                    await response.WriteAsJsonAsync(errorResponse);
+                    return response;
+            }
         }
 
-        private async Task<RegisteredInformationResponse> GetRegisteredInformation(RegisteredInformationRequest input)
+        private async Task<RegisteredInformationResponse> GetRegisteredInformation(RegisteredInformationRequest input, string headerValue)
         {
             var url = string.Empty;
 
-            switch (input.country)
+            switch (input.Country)
             {
-                case "NO": return await GetFromNorway(input.organisationNumber);
-                case "SE": return await GetFromSweden(input.organisationNumber);
-                case "FI": return await GetFromFinland(input.organisationNumber);
-                case "IS":return await GetFromIceland(input.organisationNumber);
-                case "DE":return await GetFromDenmark(input.organisationNumber);
-                default: throw new EvidenceSourcePermanentClientException(1, "Invalid country code");
+                case "":
+                case "NO": return await GetFromNorway(input.Notation, headerValue);
+                case "SE": return await GetFromSweden(input.Notation, headerValue);
+                case "FI": return await GetFromFinland(input.Notation);
+                case "IS":return await GetFromIceland(input.Notation);
+                case "DE":return await GetFromDenmark(input.Notation);
+                default: throw new EvidenceSourcePermanentClientException(1, "Invalid Country code");
             }
         }
 
@@ -103,51 +120,128 @@ namespace Altinn.Dan.Plugin.Nsg
             throw new NotImplementedException();
         }
 
-        private Task<RegisteredInformationResponse> GetFromSweden(string organisationNumber)
+        private async Task<TokenResponse> GetTokenSE(bool useCache = false)
         {
-            throw new NotImplementedException();
+            if (useCache && _settings.TokenCaching)
+            {
+                (bool hasCachedValue, TokenResponse cachedToken) = await _tokenCacheProvider.TryGetToken("TokenSE");
+                if (hasCachedValue)
+                {
+                    _logger.LogInformation("Found cached TokenSE");
+                    return cachedToken;
+                }
+            }
+            string baseAddress = _settings.TokenUrlSE;
+
+            string grant_type = "client_credentials";
+            string client_id = _settings.ClientIdSE;
+            string client_secret = _settings.ClientSecretSE;
+
+            var clientCreds = Encoding.UTF8.GetBytes($"{client_id}:{client_secret}");
+            _client.DefaultRequestHeaders.Authorization =
+                new AuthenticationHeaderValue("Basic", System.Convert.ToBase64String(clientCreds));
+
+            var formContent = new FormUrlEncodedContent(new List<KeyValuePair<string, string>>
+            {
+                new("grant_type", grant_type),
+                new("scope", _settings.ScopeSE)
+            });
+
+            HttpResponseMessage tokenResponse = await _client.PostAsync(baseAddress, formContent);
+
+            var token = JsonConvert.DeserializeObject<TokenResponse>(await tokenResponse.Content.ReadAsStringAsync());
+
+            await _tokenCacheProvider.Set("TokenSE", token,
+                new TimeSpan(0, 0, Math.Max(0, token.ExpiresIn - 5)));
+
+            return token;
+        
         }
 
-        private async Task<RegisteredInformationResponse> GetFromNorway(string organizationNumber)
+        private async Task<RegisteredInformationResponse> GetFromSweden(string organisationNumber, string header)
+        {
+            //Get auth token
+            var token = await GetTokenSE(true);
+
+            var requestbody = new RegisteredInformationRequest()
+            {
+                Notation = organisationNumber
+            };
+
+            var request = new HttpRequestMessage()
+            {
+            Content = new StringContent(JsonConvert.SerializeObject(requestbody), Encoding.UTF8, "application/json"),
+            Method = HttpMethod.Post,
+            RequestUri = new Uri(_settings.GetRegisteredInformationUrl("SE"))
+            };
+
+            request.Headers.TryAddWithoutValidation("Authorization", "Bearer " + token.AccessToken);
+            request.Headers.TryAddWithoutValidation("Content-Type", "application/json");
+            request.Headers.TryAddWithoutValidation("Accept", "application/json;charset=utf-8");
+
+            var response = await _client.SendAsync(request);
+
+            if (response.IsSuccessStatusCode)
+            {
+                _logger.LogInformation($"Successfully retrieved from Sweden for Notation {organisationNumber}");
+                return JsonConvert.DeserializeObject<RegisteredInformationResponse>(await response.Content.ReadAsStringAsync());
+            }
+            else
+            {
+                var errorResponse = JsonConvert.DeserializeObject<NSGErrorModel>(await response.Content.ReadAsStringAsync());
+
+                if (errorResponse == null)
+                {
+                    throw new NsgException("TBD", "urn:bronnoysundregistrene:error:unknown", "server.error", "",
+                        "Could not process response from external api, " + response.ReasonPhrase, (int)response.StatusCode, "Remote server error");
+                } else
+                {
+                    throw new NsgException(errorResponse);
+                }
+            }
+        }
+
+        private async Task<RegisteredInformationResponse> GetFromNorway(string organizationNumber, string header)
         {
             if (!Regex.IsMatch(organizationNumber, @"^\d{9}$"))
             {
-                throw new EvidenceSourcePermanentClientException(
-                    EvidenceSourceMetadata.ErrorInvalidInput, "Invalid company-id");
+                throw new NsgException("TBD", "urn:bronnoysundregistrene:error:validation", "invalid", "Notation",
+                    "Invalid identifier format", 500, "Invalid Notation");
             }
 
             var unit = await _entityRegistryService.GetFull(organizationNumber, attemptSubUnitLookupIfNotFound: false);
 
             if (unit is null || unit.Slettedato is not null)
             {
-                throw new EvidenceSourcePermanentClientException(
-                    EvidenceSourceMetadata.ErrorOrganizationNotFound, "Could not find provided company-id");
+                throw new NsgException("TBD", "urn:bronnoysundregistrene:error:validation", "not.found", "Notation",
+                    "Organisation does not exist or has been deleted", 404, "Not found");
+
             }
 
             var response = new RegisteredInformationResponse();
 
-            response.registrationDate = unit.RegistreringsdatoEnhetsregisteret.Value.UtcDateTime;
-            response.name = unit.Navn;
+            response.RegistrationDate = unit.RegistreringsdatoEnhetsregisteret.Value.UtcDateTime;
+            response.Name = unit.Navn;
                 //identifier = "",
-                response.registeredAddress = new Registeredaddress()
+                response.RegisteredAddress = new Registeredaddress()
                 {
-                    fullAddress = string.Join(',', unit.Forretningsadresse.Adresse)
-                                  + ", " + unit.Forretningsadresse.Postnummer
-                                  + ", " + unit.Forretningsadresse.Poststed
-                                  + ", " + CountryCodesHelper.GetByCode(unit.Forretningsadresse.Landkode)
+                    FullAddress = string.Join(',', unit.Forretningsadresse?.Adresse)
+                                  + ", " + unit.Forretningsadresse?.Postnummer
+                                  + ", " + unit.Forretningsadresse?.Poststed
+                                  + ", " + CountryCodesHelper.GetByCode(unit.Forretningsadresse?.Landkode)
                 };
 
-                response.postalAddress = new Postaladdress()
+                response.PostalAddress = new Postaladdress()
                 {
-                    fullAddress = string.Join(',', unit.Postadresse.Adresse)
+                    FullAddress = string.Join(',', unit.Postadresse!.Adresse)
                                   + ", " + unit.Postadresse.Postnummer
                                   + ", " + unit.Postadresse.Poststed
                                   + ", " + CountryCodesHelper.GetByCode(unit.Postadresse.Landkode)
                 };
-                response.legalForm = new Legalform()
+                response.LegalForm = new Legalform()
                 {
-                    name = unit.Organisasjonsform.Beskrivelse,
-                    code = "NO_" + unit.Organisasjonsform.Kode
+                    Name = unit.Organisasjonsform.Beskrivelse,
+                    Code = "NO_" + unit.Organisasjonsform.Kode
                 };
                 response.activity = new List<Activity>();
 
@@ -156,9 +250,9 @@ namespace Altinn.Dan.Plugin.Nsg
                     new Activity()
                     {
                         code = unit.Naeringskode1.Kode.Replace(".", "").Substring(0, 4),
-                        sequence = 1,
-                        inClassification = "http://data.europa.eu/ux2/nace2/nace2",
-                        reference = $"http://data.europa.eu/ux2/nace2/{unit.Naeringskode1.Kode.Replace(".", "").Substring(0, 4)}",
+                        Sequence = 1,
+                        InClassification = "http://data.europa.eu/ux2/nace2/nace2",
+                        Reference = $"http://data.europa.eu/ux2/nace2/{unit.Naeringskode1.Kode.Replace(".", "").Substring(0, 4)}",
                     });
 
                 if (unit.Naeringskode2 != null)
@@ -166,9 +260,9 @@ namespace Altinn.Dan.Plugin.Nsg
                         new Activity()
                         {
                             code = unit.Naeringskode2.Kode.Replace(".", "").Substring(0, 4),
-                            sequence = 2,
-                            inClassification = "http://data.europa.eu/ux2/nace2/nace2",
-                            reference = $"http://data.europa.eu/ux2/nace2/{unit.Naeringskode2.Kode.Replace(".", "").Substring(0, 4)}",
+                            Sequence = 2,
+                            InClassification = "http://data.europa.eu/ux2/nace2/nace2",
+                            Reference = $"http://data.europa.eu/ux2/nace2/{unit.Naeringskode2.Kode.Replace(".", "").Substring(0, 4)}",
                         });
 
                 if (unit.Naeringskode3 != null)
@@ -176,51 +270,48 @@ namespace Altinn.Dan.Plugin.Nsg
                         new Activity()
                         {
                             code = unit.Naeringskode3.Kode.Replace(".", "").Substring(0, 4),
-                            sequence = 3,
-                            inClassification = "http://data.europa.eu/ux2/nace2/nace2",
-                            reference = $"http://data.europa.eu/ux2/nace2/{unit.Naeringskode3.Kode.Replace(".", "").Substring(0, 4)}",
+                            Sequence = 3,
+                            InClassification = "http://data.europa.eu/ux2/nace2/nace2",
+                            Reference = $"http://data.europa.eu/ux2/nace2/{unit.Naeringskode3.Kode.Replace(".", "").Substring(0, 4)}",
                         });
         
-                response.identifier = new Identifier()
+                response.Identifier = new Identifier()
                 {
-                    issuingAuthorityName = "Brønnøysundregistrene",
-                    notation = unit.Organisasjonsnummer
+                    IssuingAuthorityName = "Brønnøysundregistrene",
+                    Notation = unit.Organisasjonsnummer
                 };
-                response.legalStatus = new Legalstatus();
-                response.legalStatus.code = unit.UnderTvangsavviklingEllerTvangsopplosning.Value || unit.UnderAvvikling!.Value || unit.Konkurs!.Value
+                response.LegalStatus = new Legalstatus();
+                response.LegalStatus.Code = unit.UnderTvangsavviklingEllerTvangsopplosning!.Value || unit.UnderAvvikling!.Value || unit.Konkurs!.Value
                     ? "SOME"
                     : "NONE";
-                response.legalStatus.name = response.legalStatus.code == "NONE"
+                response.LegalStatus.Name = response.LegalStatus.Code == "NONE"
                         ? "No extraordinary circumstances registered"
                         : "Some extraordinary circumstances registered";
 
             return response;
         }
 
-        private async Task<T> MakeRequest<T>(string target)
+        private async Task<T> MakeRequest<T>(HttpRequestMessage message)
         {
-            HttpResponseMessage result;
+            HttpResponseMessage result = new HttpResponseMessage();
             try
             {
-                var request = new HttpRequestMessage(HttpMethod.Get, target);
-                result = await _client.SendAsync(request);
+                result = await _client.SendAsync(message);
             }
             catch (HttpRequestException ex)
             {
-                throw new EvidenceSourceTransientException(EvidenceSourceMetadata.ErrorUpstreamError, "Error communicating with upstream source", ex);
+                throw new NsgException("TBD", "urn:bronnoysundregistrene:error:network", "network.error", "","Request to remote api failed", (int) result.StatusCode, "Network error" );
             }
 
             if (!result.IsSuccessStatusCode)
             {
                 throw result.StatusCode switch
                 {
-                    HttpStatusCode.NotFound => new EvidenceSourcePermanentClientException(
-                        EvidenceSourceMetadata.ErrorOrganizationNotFound, "Upstream source could not find provided company-id"),
-                    HttpStatusCode.BadRequest => new EvidenceSourcePermanentClientException(
-                        EvidenceSourceMetadata.ErrorInvalidInput,
-                        "Upstream source indicated an invalid company-id (400)"),
-                    _ => new EvidenceSourceTransientException(EvidenceSourceMetadata.ErrorUpstreamError,
-                        $"Upstream source retuned an HTTP error code ({(int)result.StatusCode})")
+                    HttpStatusCode.NotFound => new NsgException("TBD", "urn:bronnoysundregistrene:error:validation", "not.found", "Notation",
+                        "Organisation does not exist or has been deleted", 404, "Not found"),
+                    HttpStatusCode.BadRequest => new NsgException("TBD", "urn:bronnoysundregistrene:error:network", "server.error", "",
+                        "Request to remote api failed unexpectedly", (int) HttpStatusCode.BadRequest, "Not found"),
+                    _ => new NsgException("TBD", "urn:bronnoysundregistrene:error", "server.error", "", "Request to remote api failed unexpectedly", (int) result.StatusCode, "Error")
                 };
             }
 
