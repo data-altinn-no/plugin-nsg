@@ -19,7 +19,7 @@ namespace Altinn.Dan.Plugin.Nsg.Models.RegisteredInformation
     public class RegisteredInformationResponse
     {
         [JsonProperty("activity")]
-        public List<Activity> activity { get; set; }
+        public List<Activity> Activity { get; set; }
 
         [JsonProperty("identifier")]
         public Identifier Identifier { get; set; }

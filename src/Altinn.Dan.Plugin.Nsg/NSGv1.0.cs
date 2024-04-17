@@ -55,8 +55,8 @@ namespace Altinn.Dan.Plugin.Nsg
         public async Task<HttpResponseData> RegisteredInformation(
             [HttpTrigger(AuthorizationLevel.Function, "post", Route = null)] HttpRequestData req)
         {
-            var requestHeader = req.Headers.GetValues("x-request-id").FirstOrDefault();
-            requestHeader = string.IsNullOrEmpty(requestHeader) ? "NOT SET" : requestHeader;
+            var requestHeader = req.Headers.TryGetValues("x-request-id", out var values) ? values.First() : "NOT_SET";
+            //requestHeader = string.IsNullOrEmpty(requestHeader) ? "NOT SET" : requestHeader;
             _logger.LogInformation($"registered-organisations called with custom header {requestHeader}");
 
             var input = await req.ReadFromJsonAsync<RegisteredInformationRequest>();
@@ -183,8 +183,9 @@ namespace Altinn.Dan.Plugin.Nsg
 
             if (response.IsSuccessStatusCode)
             {
+                var content = await response.Content.ReadAsStringAsync();
                 _logger.LogInformation($"Successfully retrieved from Sweden for Notation {organisationNumber}");
-                return JsonConvert.DeserializeObject<RegisteredInformationResponse>(await response.Content.ReadAsStringAsync());
+                return JsonConvert.DeserializeObject<RegisteredInformationResponse>(content);
             }
             else
             {
@@ -243,10 +244,10 @@ namespace Altinn.Dan.Plugin.Nsg
                     Name = unit.Organisasjonsform.Beskrivelse,
                     Code = "NO_" + unit.Organisasjonsform.Kode
                 };
-                response.activity = new List<Activity>();
+                response.Activity = new List<Activity>();
 
                 if (unit.Naeringskode1 != null)
-                    response.activity.Add(
+                    response.Activity.Add(
                     new Activity()
                     {
                         code = unit.Naeringskode1.Kode.Replace(".", "").Substring(0, 4),
@@ -256,7 +257,7 @@ namespace Altinn.Dan.Plugin.Nsg
                     });
 
                 if (unit.Naeringskode2 != null)
-                    response.activity.Add(
+                    response.Activity.Add(
                         new Activity()
                         {
                             code = unit.Naeringskode2.Kode.Replace(".", "").Substring(0, 4),
@@ -266,7 +267,7 @@ namespace Altinn.Dan.Plugin.Nsg
                         });
 
                 if (unit.Naeringskode3 != null)
-                    response.activity.Add(
+                    response.Activity.Add(
                         new Activity()
                         {
                             code = unit.Naeringskode3.Kode.Replace(".", "").Substring(0, 4),
