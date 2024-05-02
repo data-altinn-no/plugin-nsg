@@ -40,7 +40,7 @@ namespace Altinn.Dan.Plugin.Nsg.Models.RegisteredInformation
         public Registeredaddress RegisteredAddress { get; set; }
 
         [JsonProperty("registrationDate")]
-        public DateTime RegistrationDate { get; set; }
+        public string RegistrationDate { get; set; }
 
     }
 

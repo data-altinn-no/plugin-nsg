@@ -210,7 +210,7 @@ namespace Altinn.Dan.Plugin.Nsg
                     "Invalid identifier format", 500, "Invalid Notation");
             }
 
-            var unit = await _entityRegistryService.GetFull(organizationNumber, attemptSubUnitLookupIfNotFound: false);
+            var unit = await _entityRegistryService.GetFull(organizationNumber, attemptSubUnitLookupIfNotFound: true);
 
             if (unit is null || unit.Slettedato is not null)
             {
@@ -221,24 +221,32 @@ namespace Altinn.Dan.Plugin.Nsg
 
             var response = new RegisteredInformationResponse();
 
-            response.RegistrationDate = unit.RegistreringsdatoEnhetsregisteret.Value.UtcDateTime;
+            response.RegistrationDate = unit.RegistreringsdatoEnhetsregisteret!.Value.UtcDateTime.ToString("yyyy-MM-dd");
             response.Name = unit.Navn;
                 //identifier = "",
-                response.RegisteredAddress = new Registeredaddress()
-                {
-                    FullAddress = string.Join(',', unit.Forretningsadresse?.Adresse)
-                                  + ", " + unit.Forretningsadresse?.Postnummer
-                                  + ", " + unit.Forretningsadresse?.Poststed
-                                  + ", " + CountryCodesHelper.GetByCode(unit.Forretningsadresse?.Landkode)
-                };
 
-                response.PostalAddress = new Postaladdress()
+                if (unit.Forretningsadresse != null)
                 {
-                    FullAddress = string.Join(',', unit.Postadresse!.Adresse)
-                                  + ", " + unit.Postadresse.Postnummer
-                                  + ", " + unit.Postadresse.Poststed
-                                  + ", " + CountryCodesHelper.GetByCode(unit.Postadresse.Landkode)
-                };
+                    response.RegisteredAddress = new Registeredaddress()
+                    {
+                        FullAddress = string.Join(',', unit.Forretningsadresse!.Adresse)
+                                      + ", " + unit.Forretningsadresse!.Postnummer
+                                      + ", " + unit.Forretningsadresse!.Poststed
+                                      + ", " + CountryCodesHelper.GetByCode(unit.Forretningsadresse!.Landkode)
+                    };
+                }
+
+                if (unit.Postadresse != null)
+                {
+                    response.PostalAddress = new Postaladdress()
+                    {
+                        FullAddress = string.Join(',', unit!.Postadresse!.Adresse)
+                                      + ", " + unit!.Postadresse!.Postnummer
+                                      + ", " + unit!.Postadresse!.Poststed
+                                      + ", " + CountryCodesHelper.GetByCode(unit!.Postadresse!.Landkode)
+                    };
+                }
+                
                 response.LegalForm = new Legalform()
                 {
                     Name = unit.Organisasjonsform.Beskrivelse,
