@@ -91,14 +91,12 @@ namespace Altinn.Dan.Plugin.Nsg
 
         private async Task<RegisteredInformationResponse> GetRegisteredInformation(RegisteredInformationRequest input, string headerValue)
         {
-            var url = string.Empty;
-
             switch (input.Country)
             {
                 case "":
                 case "NO": return await GetFromNorway(input.Notation, headerValue);
                 case "SE": return await GetFromSweden(input.Notation, headerValue);
-                case "FI": return await GetFromFinland(input.Notation);
+                case "FI": return await GetFromFinland(input.Notation, headerValue);
                 case "IS":return await GetFromIceland(input.Notation);
                 case "DE":return await GetFromDenmark(input.Notation);
                 default: throw new EvidenceSourcePermanentClientException(1, "Invalid Country code");
@@ -115,9 +113,69 @@ namespace Altinn.Dan.Plugin.Nsg
             throw new NotImplementedException();
         }
 
-        private Task<RegisteredInformationResponse> GetFromFinland(string organisationNumber)
+        private async Task<RegisteredInformationResponse> GetFromFinland(string organisationNumber, string headerValue)
         {
-            throw new NotImplementedException();
+            var requestbody = new RegisteredInformationRequest()
+            {
+                Notation = organisationNumber,
+                Country = "FI"
+            };
+
+            var request = new HttpRequestMessage()
+            {
+                Content = new StringContent(JsonConvert.SerializeObject(requestbody), Encoding.UTF8, "application/json"),
+                Method = HttpMethod.Post,
+                RequestUri = new Uri(string.Format(_settings.ProxyUrl, _settings.GetRegisteredInformationUrl("FI").Replace("https://","")))
+            };
+
+            request.Content.Headers.ContentType.CharSet = string.Empty;
+
+            request.Headers.TryAddWithoutValidation("Content-Type", "application/json");
+            request.Headers.TryAddWithoutValidation("Accept", "application/json");
+
+            var handler = new HttpClientHandler();
+            handler.ClientCertificateOptions = ClientCertificateOption.Manual;
+            handler.ServerCertificateCustomValidationCallback =
+                (httpRequestMessage, cert, cetChain, policyErrors) =>
+                {
+                    return true;
+                };
+
+            var client = new HttpClient(handler);
+
+            var response = await client.SendAsync(request);
+
+            if (response.IsSuccessStatusCode)
+            {
+                var content = await response.Content.ReadAsStringAsync();
+                _logger.LogInformation($"Successfully retrieved from Finland for Notation {organisationNumber}");
+                return JsonConvert.DeserializeObject<RegisteredInformationResponse>(content);
+            }
+            else
+            {
+                try
+                {
+                    var content = await response.Content.ReadAsStringAsync();
+                    var errorResponse = JsonConvert.DeserializeObject<NSGErrorModel>(content);
+
+                    if (errorResponse == null)
+                    {
+                        throw new NsgException("TBD", "urn:bronnoysundregistrene:error:unknown", "server.error", "",
+                            "Could not process response from external api, " + response.ReasonPhrase, (int)response.StatusCode, "Remote server error");
+                    }
+                    else
+                    {
+                        throw new NsgException(errorResponse);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error parsing response from Finland");
+                    throw new NsgException("TBD", "urn:bronnoysundregistrene:error:unknown", "server.error", "",
+                                               "Could not process response from external api, " + response.ReasonPhrase, (int)response.StatusCode, "Remote server error");
+                }
+
+            }
         }
 
         private async Task<TokenResponse> GetTokenSE(bool useCache = false)
