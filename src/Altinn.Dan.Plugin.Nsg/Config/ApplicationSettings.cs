@@ -59,5 +59,7 @@ namespace Altinn.Dan.Plugin.Nsg.Config
         public bool TokenCaching { get; set; }
 
         public string ProxyUrl { get; set; }
+
+        public string ClientSecretIs { get; set; }
     }
 }

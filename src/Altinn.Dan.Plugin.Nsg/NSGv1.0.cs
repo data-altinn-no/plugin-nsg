@@ -108,9 +108,41 @@ namespace Altinn.Dan.Plugin.Nsg
             throw new NotImplementedException();
         }
 
-        private Task<RegisteredInformationResponse> GetFromIceland(string organisationNumber)
-        {
-            throw new NotImplementedException();
+        private async Task<RegisteredInformationResponse> GetFromIceland(string organisationNumber)
+        {            
+            var request = new HttpRequestMessage()
+            {
+               // Content = new StringContent(JsonConvert.SerializeObject(requestbody), Encoding.UTF8, "application/json"),
+                Method = HttpMethod.Get,
+                RequestUri = new Uri(string.Format(_settings.GetRegisteredInformationUrl("IS"), organisationNumber))
+            };
+
+            request.Headers.TryAddWithoutValidation("ocp-apim-subscription-key", _settings.ClientSecretIs);
+            request.Headers.TryAddWithoutValidation("Content-Type", "application/json");
+            request.Headers.TryAddWithoutValidation("Accept", "application/json;charset=utf-8");
+
+            var response = await _client.SendAsync(request);
+
+            if (response.IsSuccessStatusCode)
+            {
+                var content = await response.Content.ReadAsStringAsync();
+                _logger.LogInformation($"Successfully retrieved from Iceland for Notation {organisationNumber}");
+                return JsonConvert.DeserializeObject<RegisteredInformationResponse>(content);
+            }
+            else
+            {
+                var errorResponse = JsonConvert.DeserializeObject<NSGErrorModel>(await response.Content.ReadAsStringAsync());
+
+                if (errorResponse == null)
+                {
+                    throw new NsgException("TBD", "urn:bronnoysundregistrene:error:unknown", "server.error", "",
+                        "Could not process response from external api, " + response.ReasonPhrase, (int)response.StatusCode, "Remote server error");
+                }
+                else
+                {
+                    throw new NsgException(errorResponse);
+                }
+            }
         }
 
         private async Task<RegisteredInformationResponse> GetFromFinland(string organisationNumber, string headerValue)
