@@ -48,7 +48,7 @@ namespace Altinn.Dan.Plugin.Nsg
                 return req.CreateResponse(HttpStatusCode.OK);
             else
                 return req.CreateResponse(HttpStatusCode.InternalServerError);
-            
+
         }
 
         [Function("registered-organisations")]
@@ -60,7 +60,6 @@ namespace Altinn.Dan.Plugin.Nsg
             _logger.LogInformation($"registered-organisations called with custom header {requestHeader}");
 
             var input = await req.ReadFromJsonAsync<RegisteredInformationRequest>();
-            input.Notation = new string(input.Notation.Where(c => char.IsDigit(c)).ToArray());
             try
             {
                 var info = await GetRegisteredInformation(input, requestHeader);
@@ -245,12 +244,13 @@ namespace Altinn.Dan.Plugin.Nsg
                 new TimeSpan(0, 0, Math.Max(0, token.ExpiresIn - 5)));
 
             return token;
-        
+
         }
 
         private async Task<RegisteredInformationResponse> GetFromSweden(string organisationNumber, string header)
         {
             //Get auth token
+            organisationNumber = new string(organisationNumber.Where(char.IsDigit).ToArray());
             var token = await GetTokenSE(true);
 
             var requestbody = new RegisteredInformationRequest()
@@ -294,6 +294,7 @@ namespace Altinn.Dan.Plugin.Nsg
 
         private async Task<RegisteredInformationResponse> GetFromNorway(string organizationNumber, string header)
         {
+            organizationNumber = new string(organizationNumber.Where(char.IsDigit).ToArray());
             if (!Regex.IsMatch(organizationNumber, @"^\d{9}$"))
             {
                 throw new NsgException("TBD", "urn:bronnoysundregistrene:error:validation", "invalid", "Notation",
@@ -336,7 +337,7 @@ namespace Altinn.Dan.Plugin.Nsg
                                       + ", " + CountryCodesHelper.GetByCode(unit!.Postadresse!.Landkode)
                     };
                 }
-                
+
                 response.LegalForm = new Legalform()
                 {
                     Name = unit.Organisasjonsform.Beskrivelse,
@@ -373,7 +374,7 @@ namespace Altinn.Dan.Plugin.Nsg
                             InClassification = "http://data.europa.eu/ux2/nace2/nace2",
                             Reference = $"http://data.europa.eu/ux2/nace2/{unit.Naeringskode3.Kode.Replace(".", "").Substring(0, 4)}",
                         });
-        
+
                 response.Identifier = new Identifier()
                 {
                     IssuingAuthorityName = "Brønnøysundregistrene",
