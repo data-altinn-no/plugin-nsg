@@ -8,10 +8,10 @@
     <FunctionsEnableWorkerIndexing>false</FunctionsEnableWorkerIndexing>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Dan.Common" Version="1.9.0" />
+    <PackageReference Include="Dan.Common" Version="1.10.0" />
     <PackageReference Include="IdentityModel" Version="7.0.0" />
     <PackageReference Include="Microsoft.ApplicationInsights.WorkerService" Version="2.23.0" />
-    <PackageReference Include="Microsoft.Azure.Functions.Worker.Sdk" Version="2.0.5" OutputItemType="Analyzer" />
+    <PackageReference Include="Microsoft.Azure.Functions.Worker.Sdk" Version="2.0.6" OutputItemType="Analyzer" />
     <PackageReference Include="Microsoft.Azure.Functions.Worker.Extensions.Http" Version="3.3.0" />
     <PackageReference Include="Microsoft.Extensions.Caching.Abstractions" Version="9.0.10" />
     <PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="9.0.10" />

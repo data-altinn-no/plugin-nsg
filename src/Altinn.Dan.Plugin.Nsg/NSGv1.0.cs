@@ -20,6 +20,9 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Identifier = Altinn.Dan.Plugin.Nsg.Models.RegisteredInformation.Identifier;
+using Altinn.Dan.Plugin.Nsg.Extensions;
+
+using Dan.Common.Enums;
 
 namespace Altinn.Dan.Plugin.Nsg
 {
@@ -62,9 +65,11 @@ namespace Altinn.Dan.Plugin.Nsg
             var input = await req.ReadFromJsonAsync<RegisteredInformationRequest>();
             try
             {
+                _logger.DanLog(LogAction.DatasetRequested, owner: "NSG", requestor: "OpenData", serviceContext: "NSG");
                 var info = await GetRegisteredInformation(input, requestHeader);
                 var response = req.CreateResponse();
                 await response.WriteAsJsonAsync(info);
+                _logger.DanLog(LogAction.DatasetRetrieved,owner: "NSG", requestor: "OpenData", serviceContext: "NSG");
                 return response;
             }
             catch (NsgException ex)
