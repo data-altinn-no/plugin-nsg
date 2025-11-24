@@ -16,7 +16,7 @@
     <PackageReference Include="Microsoft.Extensions.Caching.Abstractions" Version="9.0.10" />
     <PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="9.0.10" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.10" />
-    <PackageReference Include="Microsoft.IdentityModel.Tokens" Version="8.14.0" />
+    <PackageReference Include="Microsoft.IdentityModel.Tokens" Version="8.15.0" />
   </ItemGroup>
   <ItemGroup>
     <None Update="host.json">
