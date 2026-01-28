@@ -65,11 +65,11 @@ namespace Altinn.Dan.Plugin.Nsg
             var input = await req.ReadFromJsonAsync<RegisteredInformationRequest>();
             try
             {
-                _logger.DanLog(LogAction.DatasetRequested, owner: "NSG", requestor: "OpenData", serviceContext: "NSG");
+                _logger.DanLog(LogAction.DatasetRequested, owner: "NSG", requestor: "OpenData", serviceContext: "NSG", evidenceCodeName: "Registered Organisations");
                 var info = await GetRegisteredInformation(input, requestHeader);
                 var response = req.CreateResponse();
                 await response.WriteAsJsonAsync(info);
-                _logger.DanLog(LogAction.DatasetRetrieved,owner: "NSG", requestor: "OpenData", serviceContext: "NSG");
+                _logger.DanLog(LogAction.DatasetRetrieved,owner: "NSG", requestor: "OpenData", serviceContext: "NSG", evidenceCodeName: "Registered Organisations");
                 return response;
             }
             catch (NsgException ex)

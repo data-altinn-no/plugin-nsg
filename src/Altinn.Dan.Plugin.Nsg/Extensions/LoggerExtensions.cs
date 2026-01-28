@@ -48,11 +48,12 @@ namespace Altinn.Dan.Plugin.Nsg.Extensions
             string owner,
             string requestor,
             string serviceContext,
+            string evidenceCodeName,
             [CallerFilePath] string callingClass = "",
             [CallerMemberName] string callingMethod = "")
         {
             logger.LogInformation(LogString, Enum.GetName(typeof(LogAction), action),
-                Path.GetFileNameWithoutExtension(callingClass), callingMethod, null, "", "", owner, requestor, "", "", DateTime.UtcNow, serviceContext);
+                Path.GetFileNameWithoutExtension(callingClass), callingMethod, null, "", "", owner, requestor, "", evidenceCodeName, DateTime.UtcNow, serviceContext);
         }
     }
 }
