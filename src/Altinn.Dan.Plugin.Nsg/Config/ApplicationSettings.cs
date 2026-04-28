@@ -61,5 +61,10 @@ namespace Altinn.Dan.Plugin.Nsg.Config
         public string ProxyUrl { get; set; }
 
         public string ClientSecretIs { get; set; }
+        public string HvdClientId { get; set; }
+        public string HvdClientSecret { get; set; }
+        public string HvdBaseUrl { get; set; }
+        public string HvdTokenUrl { get; set; }
+        public string HvdScope { get; set; }
     }
 }
