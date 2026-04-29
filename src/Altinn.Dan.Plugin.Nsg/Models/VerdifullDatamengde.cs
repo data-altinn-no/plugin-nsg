@@ -12,6 +12,7 @@ namespace Altinn.Dan.Plugin.Nsg.Models
 
     public class VerdifullDatamengdeResponse
     {
+        [JsonProperty("organisationer")]
         public List<Organisasjon> Organisationer { get; set; }
     }
 
@@ -42,7 +43,7 @@ namespace Altinn.Dan.Plugin.Nsg.Models
     public class OrganisationsnamnWrapper
     {
         public List<Organisationsnamn> OrganisationsnamnLista { get; set; }
-        public string Fel { get; set; }
+        public Fel Fel { get; set; }
         public string Dataproducent { get; set; }
     }
 
@@ -52,6 +53,12 @@ namespace Altinn.Dan.Plugin.Nsg.Models
         public string Namn { get; set; }
         public Organisationsnamntyp Organisationsnamntyp { get; set; }
         public string VerksamhetsbeskrivningSarskiltForetagsnamn { get; set; }
+    }
+
+    public class Fel
+    {
+        public string FelBeskrivning { get; set; }
+        public string Typ { get; set; }
     }
 
     public class Organisationsnamntyp
@@ -70,14 +77,14 @@ namespace Altinn.Dan.Plugin.Nsg.Models
     {
         public string Kod { get; set; }
         public string Klartext { get; set; }
-        public string Fel { get; set; }
+        public Fel Fel { get; set; }
         public string Dataproducent { get; set; }
     }
 
     public class ReklameSparr
     {
         public string Kod { get; set; }
-        public string Fel { get; set; }
+        public Fel Fel { get; set; }
         public string Dataproducent { get; set; }
     }
 
@@ -85,21 +92,21 @@ namespace Altinn.Dan.Plugin.Nsg.Models
     {
         public string Kod { get; set; }
         public string Klartext { get; set; }
-        public string Fel { get; set; }
+        public Fel Fel { get; set; }
         public string Dataproducent { get; set; }
     }
 
     public class VerksamOrganisation
     {
         public string Kod { get; set; }
-        public string Fel { get; set; }
+        public Fel Fel { get; set; }
         public string Dataproducent { get; set; }
     }
 
     public class PostadressOrganisation
     {
         public Postadress Postadress { get; set; }
-        public string Fel { get; set; }
+        public Fel Fel { get; set; }
         public string Dataproducent { get; set; }
     }
 
@@ -114,7 +121,7 @@ namespace Altinn.Dan.Plugin.Nsg.Models
 
     public class Verksamhetsbeskrivning
     {
-        public string Fel { get; set; }
+        public Fel Fel { get; set; }
         public string Dataproducent { get; set; }
         public string Beskrivning { get; set; }
     }
@@ -122,7 +129,7 @@ namespace Altinn.Dan.Plugin.Nsg.Models
     public class Organisationsdatum
     {
         public string Registreringsdatum { get; set; }
-        public string Fel { get; set; }
+        public Fel Fel { get; set; }
         public string Dataproducent { get; set; }
         public string InfortHosScb { get; set; }
     }
@@ -130,14 +137,14 @@ namespace Altinn.Dan.Plugin.Nsg.Models
     public class AvregistreradOrganisation
     {
         public DateTime? Avregistreringsdatum { get; set; }
-        public string Fel { get; set; }
+        public Fel Fel { get; set; }
         public string Dataproducent { get; set; }
     }
 
     public class Avregistreringsorsak
     {
         public string Kod { get; set; }
-        public string Fel { get; set; }
+        public Fel Fel { get; set; }
         public string Dataproducent { get; set; }
         public string Klartext { get; set; }
     }
@@ -145,7 +152,7 @@ namespace Altinn.Dan.Plugin.Nsg.Models
     public class PagandeAvvecklingsEllerOmstruktureringsforfarande
     {
         public List<PagandeAvvecklingsEllerOmstruktureringsforfarandeItem> PagandeAvvecklingsEllerOmstruktureringsforfarandeLista { get; set; }
-        public string Fel { get; set; }
+        public Fel Fel { get; set; }
         public string Dataproducent { get; set; }
     }
 
@@ -158,7 +165,7 @@ namespace Altinn.Dan.Plugin.Nsg.Models
 
     public class NaringsgrenOrganisation
     {
-        public string Fel { get; set; }
+        public Fel Fel { get; set; }
         public string Dataproducent { get; set; }
         public List<Sni> Sni { get; set; }
     }
