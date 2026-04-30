@@ -86,7 +86,7 @@ namespace Altinn.Dan.Plugin.Nsg
                     type = ex.ErrorType
                 };
 
-                var response = req.CreateResponse();
+                var response = req.CreateResponse((HttpStatusCode)ex.ErrorStatus);
                 await response.WriteAsJsonAsync(errorResponse);
                 return response;
             }
@@ -213,51 +213,12 @@ namespace Altinn.Dan.Plugin.Nsg
             }
         }
 
-        private async Task<TokenResponse> GetTokenSE(bool useCache = false)
-        {
-            if (useCache && _settings.TokenCaching)
-            {
-                (bool hasCachedValue, TokenResponse cachedToken) = await _tokenCacheProvider.TryGetToken("TokenSE");
-                if (hasCachedValue)
-                {
-                    _logger.LogInformation("Found cached TokenSE");
-                    return cachedToken;
-                }
-            }
-            string baseAddress = _settings.TokenUrlSE;
-
-            string grant_type = "client_credentials";
-            string client_id = _settings.ClientIdSE;
-            string client_secret = _settings.ClientSecretSE;
-
-            var clientCreds = Encoding.UTF8.GetBytes($"{client_id}:{client_secret}");
-            _client.DefaultRequestHeaders.Authorization =
-                new AuthenticationHeaderValue("Basic", System.Convert.ToBase64String(clientCreds));
-
-            var formContent = new FormUrlEncodedContent(new List<KeyValuePair<string, string>>
-            {
-                new("grant_type", grant_type),
-                new("scope", _settings.ScopeSE)
-            });
-
-            HttpResponseMessage tokenResponse = await _client.PostAsync(baseAddress, formContent);
-
-            var token = JsonConvert.DeserializeObject<TokenResponse>(await tokenResponse.Content.ReadAsStringAsync());
-
-            await _tokenCacheProvider.Set("TokenSE", token,
-                new TimeSpan(0, 0, Math.Max(0, token.ExpiresIn - 5)));
-
-            return token;
-
-        }
-
         private async Task<RegisteredInformationResponse> GetFromSweden(string organisationNumber, string header)
         {
             organisationNumber = new string(organisationNumber.Where(char.IsDigit).ToArray());
 
             //Get auth token
             var token = await GenerateTokenSE();
-            _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token.AccessToken);
 
             var requestbody = new OrganisationerRequest()
             {
@@ -270,6 +231,8 @@ namespace Altinn.Dan.Plugin.Nsg
                 Method = HttpMethod.Post,
                 RequestUri = new Uri($"{_settings.HvdBaseUrl}organisationer")
             };
+
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.AccessToken);
 
             var response = await _client.SendAsync(request);
 
@@ -406,20 +369,30 @@ namespace Altinn.Dan.Plugin.Nsg
             var url = $"{_settings.HvdTokenUrl}oauth2/token";
 
             var credentials = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{clientId}:{clientSecret}"));
-
-            _client.DefaultRequestHeaders.Authorization =
-            new AuthenticationHeaderValue("Basic", credentials);
-
+           
             var content = new FormUrlEncodedContent(new[]
             {
                 new KeyValuePair<string, string>("grant_type", "client_credentials"),
                 new KeyValuePair<string, string>("scope", scope)
             });
 
-            var response = await _client.PostAsync(url, content);
-            response.EnsureSuccessStatusCode();
+            using var request = new HttpRequestMessage(HttpMethod.Post, url)
+            {
+                Content = content                
+            };
 
+            request.Headers.Authorization = new AuthenticationHeaderValue("Basic", credentials);
+
+            var response = await _client.SendAsync(request);
             var json = await response.Content.ReadAsStringAsync();
+
+            if(!response.IsSuccessStatusCode)
+            {
+                _logger.LogError($"Failed to retrieve token from Sweden API. Status: {response.StatusCode}, Response: {json}");
+                throw new NsgException("TBD", "urn:bronnoysundregistrene:error:authentication", "authentication.failed", "",
+                    "Failed to retrieve access token from Sweden API", (int)response.StatusCode, "Authentication failed");
+            }
+
             return JsonConvert.DeserializeObject<TokenResponse>(json);
         }
 
