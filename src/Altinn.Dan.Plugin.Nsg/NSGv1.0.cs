@@ -400,7 +400,8 @@ namespace Altinn.Dan.Plugin.Nsg
         {
             var org = orgData?.Organisationer?.FirstOrDefault();
             if (org == null)
-                return null;
+                throw new NsgException("TBD", "urn:bronnoysundregistrene:error:validation", "not.found", "Notation",
+                    "Organisation does not exist or has been deleted", 404, "Not found");
 
             var firstName = org.Organisationsnamn?.OrganisationsnamnLista?.FirstOrDefault();
 
