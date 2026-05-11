@@ -398,10 +398,24 @@ namespace Altinn.Dan.Plugin.Nsg
 
         private async Task<RegisteredInformationResponse> MapOrgData(VerdifullDatamengdeResponse orgData)
         {
-            var org = orgData?.Organisationer?.FirstOrDefault();
-            if (org == null)
+            // Sole traders bruker personnummer som identifier og kan
+            // ha flere "namnskyddslöpnummer" - ett per registrert virksomhetsnavn.
+            // Vardefulla datamengder-APIet returnerer  en liste, så vi velger den oppføringen med siste registreringsdato (anbefalt fra Bolagsverket).
+            var orgs = orgData?.Organisationer;
+            if (orgs == null || orgs.Count == 0)
                 throw new NsgException("TBD", "urn:bronnoysundregistrene:error:validation", "not.found", "Notation",
                     "Organisation does not exist or has been deleted", 404, "Not found");
+
+            if (orgs.Count > 1)
+            {
+                _logger.LogInformation(
+                    "Bolagsverket returnerte {Count} oppføringer (sole trader med flere namnskyddslöpnummer). Velger nyeste registreringsdato.",
+                    orgs.Count);
+            }
+
+            var org = orgs
+                .OrderByDescending(o => DateTime.TryParse(o.Organisationsdatum?.Registreringsdatum, out var d) ? d : DateTime.MinValue)
+                .First();
 
             var firstName = org.Organisationsnamn?.OrganisationsnamnLista?.FirstOrDefault();
 
@@ -411,16 +425,41 @@ namespace Altinn.Dan.Plugin.Nsg
                 ? null
                 : $"{post.Utdelningsadress ?? ""} {post.Postnummer} {post.Postort}".Trim();
 
-            // Activities (SNI)
+            // Activities (SNI -> NACE: SNI er 5-sifret, NACE er 4-sifret. Kutt nasjonalt 5. siffer.)
             var activities = org.NaringsgrenOrganisation?.Sni?
-                .Select((sni, index) => new Activity
+                .Where(sni => !string.IsNullOrWhiteSpace(sni.Kod))
+                .Select((sni, index) =>
                 {
-                    code = sni.Kod,
-                    InClassification = "SNI",
-                    Reference = sni.Klartext,
-                    Sequence = index + 1
+                    var digits = sni.Kod?.Replace(".", "");
+                    var naceCode = digits.Length >= 4 ? digits.Substring(0, 4) : digits;
+                    return new Activity
+                    {
+                        code = naceCode,
+                        InClassification = "http://data.europa.eu/ux2/nace2/nace2",
+                        Reference = $"http://data.europa.eu/ux2/nace2/{naceCode}",
+                        Sequence = index + 1
+                    };
                 })
                 .ToList();
+
+            // Bruk den mest sentrale tilgjengelige verdien, med Bolagsverket som siste fallback.
+            var issuingAuthority =
+                (string.IsNullOrWhiteSpace(org.Organisationsnamn?.Dataproducent) ? null : org.Organisationsnamn.Dataproducent)
+                ?? (string.IsNullOrWhiteSpace(org.Organisationsform?.Dataproducent) ? null : org.Organisationsform.Dataproducent)
+                ?? (string.IsNullOrWhiteSpace(org.Organisationsdatum?.Dataproducent) ? null : org.Organisationsdatum.Dataproducent)
+                ?? "Bolagsverket";
+
+            // LegalStatus: hvis det finnes en avregistreringsårsak ELLER pågående
+            // avvikling/omstrukturering -> SOME_REGISTERED. Ellers NO_REGISTERED.
+            var hasOngoingProceedings = org.PagandeAvvecklingsEllerOmstruktureringsforfarande
+                ?.PagandeAvvecklingsEllerOmstruktureringsforfarandeLista?.Any() == true;
+            var hasDeregistrationReason = !string.IsNullOrWhiteSpace(org.Avregistreringsorsak?.Kod);
+            var legalStatusCode = (hasDeregistrationReason || hasOngoingProceedings)
+                ? "SOME_REGISTERED"
+                : "NO_REGISTERED";
+            var legalStatusName = legalStatusCode == "NO_REGISTERED"
+                ? "No extraordinary circumstances registered"
+                : "Some extraordinary circumstances registered";
 
             return new RegisteredInformationResponse
             {
@@ -431,19 +470,19 @@ namespace Altinn.Dan.Plugin.Nsg
                 Identifier = new Identifier
                 {
                     Notation = org.Organisationsidentitet?.Identitetsbeteckning,
-                    IssuingAuthorityName = "Bolagsverket"
+                    IssuingAuthorityName = issuingAuthority
                 },
 
                 LegalForm = new Legalform
                 {
-                    Code = org.Organisationsform?.Kod,
+                    Code = org.Organisationsform?.Kod != null ? "SE_" + org.Organisationsform.Kod : null,
                     Name = org.Organisationsform?.Klartext
                 },
 
                 LegalStatus = new Legalstatus
                 {
-                    Code = org.Avregistreringsorsak?.Kod,
-                    Name = org.Avregistreringsorsak?.Klartext
+                    Code = legalStatusCode,
+                    Name = legalStatusName
                 },
 
                 PostalAddress = new Postaladdress
@@ -451,7 +490,6 @@ namespace Altinn.Dan.Plugin.Nsg
                     FullAddress = fullAddress
                 },
 
-                // Sverige API gir ofte ikke separat "registered address"
                 RegisteredAddress = new Registeredaddress
                 {
                     FullAddress = fullAddress
