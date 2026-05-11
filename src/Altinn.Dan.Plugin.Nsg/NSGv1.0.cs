@@ -427,9 +427,10 @@ namespace Altinn.Dan.Plugin.Nsg
 
             // Activities (SNI -> NACE: SNI er 5-sifret, NACE er 4-sifret. Kutt nasjonalt 5. siffer.)
             var activities = org.NaringsgrenOrganisation?.Sni?
+                .Where(sni => !string.IsNullOrWhiteSpace(sni.Kod))
                 .Select((sni, index) =>
                 {
-                    var digits = sni.Kod?.Replace(".", "") ?? string.Empty;
+                    var digits = sni.Kod?.Replace(".", "");
                     var naceCode = digits.Length >= 4 ? digits.Substring(0, 4) : digits;
                     return new Activity
                     {
@@ -443,9 +444,9 @@ namespace Altinn.Dan.Plugin.Nsg
 
             // Bruk den mest sentrale tilgjengelige verdien, med Bolagsverket som siste fallback.
             var issuingAuthority =
-                org.Organisationsnamn?.Dataproducent
-                ?? org.Organisationsform?.Dataproducent
-                ?? org.Organisationsdatum?.Dataproducent
+                (string.IsNullOrWhiteSpace(org.Organisationsnamn?.Dataproducent) ? null : org.Organisationsnamn.Dataproducent)
+                ?? (string.IsNullOrWhiteSpace(org.Organisationsform?.Dataproducent) ? null : org.Organisationsform.Dataproducent)
+                ?? (string.IsNullOrWhiteSpace(org.Organisationsdatum?.Dataproducent) ? null : org.Organisationsdatum.Dataproducent)
                 ?? "Bolagsverket";
 
             // LegalStatus: hvis det finnes en avregistreringsårsak ELLER pågående
