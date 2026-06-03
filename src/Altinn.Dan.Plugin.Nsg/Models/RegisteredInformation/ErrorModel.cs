@@ -33,3 +33,25 @@ public class NSGErrorModel
     }
 }
 
+public class VardefullaDatamangderErrorModel
+{
+    public string instance { get; set; }
+    public int status { get; set; }
+    public DateTime timestamp { get; set; }
+    public string requestId { get; set; }
+    public string title { get; set; }
+    public string detail { get; set; }
+    public VardefullaDatamangderErrorModel()
+    {
+    }
+    public VardefullaDatamangderErrorModel(VardefullaDatamangderException ex, string requestIdValue)
+    {
+        detail = ex.Detail;
+        instance = ex.Instance;
+        requestId = requestIdValue;
+        status = ex.Status;
+        timestamp = DateTime.Now.ToUniversalTime();
+        title = ex.Title;
+    }
+}
+
