@@ -1,8 +1,10 @@
 using Altinn.Dan.Plugin.Nsg.Config;
 using Altinn.Dan.Plugin.Nsg.Exceptions;
+using Altinn.Dan.Plugin.Nsg.Extensions;
 using Altinn.Dan.Plugin.Nsg.Models;
 using Altinn.Dan.Plugin.Nsg.Models.RegisteredInformation;
 using Dan.Common;
+using Dan.Common.Enums;
 using Dan.Common.Exceptions;
 using Dan.Common.Interfaces;
 using Microsoft.Azure.Functions.Worker;
@@ -20,8 +22,6 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Identifier = Altinn.Dan.Plugin.Nsg.Models.RegisteredInformation.Identifier;
-using Altinn.Dan.Plugin.Nsg.Extensions;
-using Dan.Common.Enums;
 
 namespace Altinn.Dan.Plugin.Nsg
 {
@@ -216,6 +216,12 @@ namespace Altinn.Dan.Plugin.Nsg
 
         private async Task<RegisteredInformationResponse> GetFromSweden(string organisationNumber, string header)
         {
+            if (string.IsNullOrWhiteSpace(organisationNumber))
+            {
+                throw new NsgException("TBD", "urn:bronnoysundregistrene:error:validation", "invalid", "Notation",
+                    "Notation cannot be null or empty", 400, "Invalid Notation");
+            }
+
             var digits = new string(organisationNumber.Where(char.IsDigit).ToArray());
 
             if (digits.Length != 10 && digits.Length != 12)
@@ -248,7 +254,7 @@ namespace Altinn.Dan.Plugin.Nsg
             }
             catch (NsgException)
             {
-                throw; 
+                throw;
             }
             catch (VardefullaDatamangderException ex)
             {
@@ -355,8 +361,7 @@ namespace Altinn.Dan.Plugin.Nsg
             string client_secret = _settings.ClientSecretSE;
 
             var clientCreds = Encoding.UTF8.GetBytes($"{client_id}:{client_secret}");
-            _client.DefaultRequestHeaders.Authorization =
-                new AuthenticationHeaderValue("Basic", System.Convert.ToBase64String(clientCreds));
+            var basicAuth = new AuthenticationHeaderValue("Basic", Convert.ToBase64String(clientCreds));
 
             var formContent = new FormUrlEncodedContent(new List<KeyValuePair<string, string>>
             {
@@ -364,15 +369,42 @@ namespace Altinn.Dan.Plugin.Nsg
                 new("scope", _settings.ScopeSE)
             });
 
-            HttpResponseMessage tokenResponse = await _client.PostAsync(baseAddress, formContent);
+            using var tokenRequest = new HttpRequestMessage(HttpMethod.Post, baseAddress)
+            {
+                Content = formContent
+            };
 
-            var token = JsonConvert.DeserializeObject<TokenResponse>(await tokenResponse.Content.ReadAsStringAsync());
+            tokenRequest.Headers.Authorization = basicAuth;
 
-            await _tokenCacheProvider.Set("TokenSE", token,
-                new TimeSpan(0, 0, Math.Max(0, token.ExpiresIn - 5)));
+            HttpResponseMessage tokenResponse = await _client.SendAsync(tokenRequest);
+            var responseBody = await tokenResponse.Content.ReadAsStringAsync();
+
+            if (!tokenResponse.IsSuccessStatusCode)
+            {
+                _logger.LogError("Failed to obtain Bolagsverket token: {Status} {Reason} - {Body}",
+                    (int)tokenResponse.StatusCode, tokenResponse.ReasonPhrase, responseBody);
+                throw new NsgException("TBD", "urn:bronnoysundregistrene:error:unknown", "server.error", "",
+                    $"Failed to obtain authentication token ({(int)tokenResponse.StatusCode} {tokenResponse.ReasonPhrase})",
+                    500, "Authentication error");
+            }
+
+            var token = JsonConvert.DeserializeObject<TokenResponse>(responseBody);
+
+            if (token == null || string.IsNullOrWhiteSpace(token.AccessToken))
+            {
+                _logger.LogError("Token response from Bolagsverket was empty or malformed");
+                throw new NsgException("TBD", "urn:bronnoysundregistrene:error:unknown", "server.error", "",
+                    "Empty or malformed token response from authentication server",
+                    500, "Authentication error");
+            }
+
+            if (useCache && _settings.TokenCaching)
+            {
+                await _tokenCacheProvider.Set("TokenSE", token,
+                    new TimeSpan(0, 0, Math.Max(0, token.ExpiresIn - 5)));
+            }
 
             return token;
-
         }
 
         private async Task<RegisteredInformationResponse> GetFromSwedenNSGB(string organisationNumber, string header)
@@ -534,7 +566,7 @@ namespace Altinn.Dan.Plugin.Nsg
             var url = $"{_settings.HvdTokenUrl}oauth2/token";
 
             var credentials = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{clientId}:{clientSecret}"));
-           
+
             var content = new FormUrlEncodedContent(new[]
             {
                 new KeyValuePair<string, string>("grant_type", "client_credentials"),
@@ -543,7 +575,7 @@ namespace Altinn.Dan.Plugin.Nsg
 
             using var request = new HttpRequestMessage(HttpMethod.Post, url)
             {
-                Content = content                
+                Content = content
             };
 
             request.Headers.Authorization = new AuthenticationHeaderValue("Basic", credentials);
@@ -551,7 +583,7 @@ namespace Altinn.Dan.Plugin.Nsg
             var response = await _client.SendAsync(request);
             var json = await response.Content.ReadAsStringAsync();
 
-            if(!response.IsSuccessStatusCode)
+            if (!response.IsSuccessStatusCode)
             {
                 _logger.LogError($"Failed to retrieve token from Sweden API. Status: {response.StatusCode}, Response: {json}");
                 throw new NsgException("TBD", "urn:bronnoysundregistrene:error:authentication", "authentication.failed", "",
