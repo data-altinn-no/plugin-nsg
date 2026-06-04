@@ -1,8 +1,10 @@
 using Altinn.Dan.Plugin.Nsg.Config;
 using Altinn.Dan.Plugin.Nsg.Exceptions;
+using Altinn.Dan.Plugin.Nsg.Extensions;
 using Altinn.Dan.Plugin.Nsg.Models;
 using Altinn.Dan.Plugin.Nsg.Models.RegisteredInformation;
 using Dan.Common;
+using Dan.Common.Enums;
 using Dan.Common.Exceptions;
 using Dan.Common.Interfaces;
 using Microsoft.Azure.Functions.Worker;
@@ -20,8 +22,6 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Identifier = Altinn.Dan.Plugin.Nsg.Models.RegisteredInformation.Identifier;
-using Altinn.Dan.Plugin.Nsg.Extensions;
-using Dan.Common.Enums;
 
 namespace Altinn.Dan.Plugin.Nsg
 {
@@ -213,7 +213,87 @@ namespace Altinn.Dan.Plugin.Nsg
             }
         }
 
+
         private async Task<RegisteredInformationResponse> GetFromSweden(string organisationNumber, string header)
+        {
+            if (string.IsNullOrWhiteSpace(organisationNumber))
+            {
+                throw new NsgException("TBD", "urn:bronnoysundregistrene:error:validation", "invalid", "Notation",
+                    "Notation cannot be null or empty", 400, "Invalid Notation");
+            }
+
+            var digits = new string(organisationNumber.Where(char.IsDigit).ToArray());
+
+            if (digits.Length != 10 && digits.Length != 12)
+            {
+                throw new NsgException("TBD", "urn:bronnoysundregistrene:error:validation", "invalid", "Notation",
+                    "Invalid identifier format", 400, "Invalid Notation");
+            }
+
+            if (!IsValidSwedishCheckDigit(digits))
+            {
+                throw new NsgException("TBD", "urn:bronnoysundregistrene:error:validation", "invalid", "Notation",
+                    "Company registration number has an invalid check digit", 400, "Invalid check digit");
+            }
+
+            try
+            {
+                var verdifullDatamengdeResponse = await GetFromVardefullaDatamangdeResponse(digits, header);
+
+                RegisteredInformationResponse nsgbResponse = null;
+                try
+                {
+                    nsgbResponse = await GetFromSwedenNSGB(digits, header);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "NSGB Sweden lookup failed for {Notation} — continuing with VDM only", digits);
+                }
+
+                return await MapOrgData(verdifullDatamengdeResponse, nsgbResponse);
+            }
+            catch (NsgException)
+            {
+                throw;
+            }
+            catch (VardefullaDatamangderException ex)
+            {
+                if (ex.Status == 404)
+                {
+                    _logger.LogWarning("404 source: Bolagsverket VDM API returned 404 for Notation {Notation}", digits);
+                    throw new NsgException("TBD", "urn:bronnoysundregistrene:error:validation", "not.found", "Notation",
+                        "Organisation does not exist or has been deleted", 404, "Not found");
+                }
+                throw new NsgException("TBD", "urn:bronnoysundregistrene:error:unknown", "server.error", "",
+                    ex.Detail ?? "Error from Bolagsverket", ex.Status, ex.Title ?? "Remote server error");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Unexpected error fetching from Sweden for Notation {Notation}", digits);
+                throw new NsgException("TBD", "urn:bronnoysundregistrene:error:unknown", "server.error", "",
+                    "Unexpected error fetching organisation data", 500, "Internal error");
+            }
+        }
+
+        // Luhn-validering for svenske organisasjonsnummer og personnummer.
+        // Bruker siste 10 siffer (dropper århundre for 12-sifret personnummer).
+        private static bool IsValidSwedishCheckDigit(string digitsOnly)
+        {
+            if (digitsOnly == null || (digitsOnly.Length != 10 && digitsOnly.Length != 12))
+                return false;
+
+            var n = digitsOnly.Substring(digitsOnly.Length - 10);
+            int sum = 0;
+            for (int i = 0; i < 10; i++)
+            {
+                int d = n[i] - '0';
+                int p = d * ((i % 2 == 0) ? 2 : 1);
+                sum += (p > 9) ? p - 9 : p;
+            }
+            return sum % 10 == 0;
+        }
+
+        private async Task<VerdifullDatamengdeResponse> GetFromVardefullaDatamangdeResponse(string organisationNumber, string header)
         {
             organisationNumber = new string(organisationNumber.Where(char.IsDigit).ToArray());
 
@@ -241,13 +321,129 @@ namespace Altinn.Dan.Plugin.Nsg
                 var content = await response.Content.ReadAsStringAsync();
                 _logger.LogInformation($"Successfully retrieved from Sweden for Notation {organisationNumber}");
 
-                var orgData = JsonConvert.DeserializeObject<VerdifullDatamengdeResponse>(content);
-
-                return await MapOrgData(orgData);
+                return JsonConvert.DeserializeObject<VerdifullDatamengdeResponse>(content);
             }
             else
             {
-                var errorResponse = JsonConvert.DeserializeObject<NSGErrorModel>(await response.Content.ReadAsStringAsync());
+                var errorResponse = JsonConvert.DeserializeObject<VardefullaDatamangderErrorModel>(await response.Content.ReadAsStringAsync());
+
+                if (errorResponse == null)
+                {
+                    throw new VardefullaDatamangderException(
+                        instance: "server.error",
+                        status: (int)response.StatusCode,
+                        timestamp: DateTime.UtcNow,
+                        requestId: header,
+                        title: "Remote server error",
+                        detail: $"Could not process response from Bolagsverket API ({response.ReasonPhrase})");
+                }
+                else
+                {
+                    throw new VardefullaDatamangderException(errorResponse);
+                }
+            }
+        }
+        private async Task<TokenResponse> GetTokenSE(bool useCache = false)
+        {
+            if (useCache && _settings.TokenCaching)
+            {
+                (bool hasCachedValue, TokenResponse cachedToken) = await _tokenCacheProvider.TryGetToken("TokenSE");
+                if (hasCachedValue)
+                {
+                    _logger.LogInformation("Found cached TokenSE");
+                    return cachedToken;
+                }
+            }
+            string baseAddress = _settings.TokenUrlSE;
+
+            string grant_type = "client_credentials";
+            string client_id = _settings.ClientIdSE;
+            string client_secret = _settings.ClientSecretSE;
+
+            var clientCreds = Encoding.UTF8.GetBytes($"{client_id}:{client_secret}");
+            var basicAuth = new AuthenticationHeaderValue("Basic", Convert.ToBase64String(clientCreds));
+
+            var formContent = new FormUrlEncodedContent(new List<KeyValuePair<string, string>>
+            {
+                new("grant_type", grant_type),
+                new("scope", _settings.ScopeSE)
+            });
+
+            using var tokenRequest = new HttpRequestMessage(HttpMethod.Post, baseAddress)
+            {
+                Content = formContent
+            };
+
+            tokenRequest.Headers.Authorization = basicAuth;
+
+            HttpResponseMessage tokenResponse = await _client.SendAsync(tokenRequest);
+            var responseBody = await tokenResponse.Content.ReadAsStringAsync();
+
+            if (!tokenResponse.IsSuccessStatusCode)
+            {
+                _logger.LogError("Failed to obtain Bolagsverket token: {Status} {Reason} - {Body}",
+                    (int)tokenResponse.StatusCode, tokenResponse.ReasonPhrase, responseBody);
+                throw new NsgException("TBD", "urn:bronnoysundregistrene:error:unknown", "server.error", "",
+                    $"Failed to obtain authentication token ({(int)tokenResponse.StatusCode} {tokenResponse.ReasonPhrase})",
+                    500, "Authentication error");
+            }
+
+            var token = JsonConvert.DeserializeObject<TokenResponse>(responseBody);
+
+            if (token == null || string.IsNullOrWhiteSpace(token.AccessToken))
+            {
+                _logger.LogError("Token response from Bolagsverket was empty or malformed");
+                throw new NsgException("TBD", "urn:bronnoysundregistrene:error:unknown", "server.error", "",
+                    "Empty or malformed token response from authentication server",
+                    500, "Authentication error");
+            }
+
+            if (useCache && _settings.TokenCaching)
+            {
+                await _tokenCacheProvider.Set("TokenSE", token,
+                    new TimeSpan(0, 0, Math.Max(0, token.ExpiresIn - 5)));
+            }
+
+            return token;
+        }
+
+        private async Task<RegisteredInformationResponse> GetFromSwedenNSGB(string organisationNumber, string header)
+        {
+            //Get auth token
+            organisationNumber = new string(organisationNumber.Where(char.IsDigit).ToArray());
+            var token = await GetTokenSE(true);
+
+            var requestbody = new RegisteredInformationRequest()
+            {
+                Notation = organisationNumber
+            };
+
+            var request = new HttpRequestMessage()
+            {
+                Content = new StringContent(JsonConvert.SerializeObject(requestbody), Encoding.UTF8, "application/json"),
+                Method = HttpMethod.Post,
+                RequestUri = new Uri(_settings.GetRegisteredInformationUrl("SE"))
+            };
+
+            request.Headers.TryAddWithoutValidation("Authorization", "Bearer " + token.AccessToken);
+            request.Headers.TryAddWithoutValidation("Content-Type", "application/json");
+            request.Headers.TryAddWithoutValidation("Accept", "application/json;charset=utf-8");
+
+            var response = await _client.SendAsync(request);
+
+            if (response.IsSuccessStatusCode)
+            {
+                var content = await response.Content.ReadAsStringAsync();
+                _logger.LogInformation($"Successfully retrieved from Sweden for Notation {organisationNumber}");
+                return JsonConvert.DeserializeObject<RegisteredInformationResponse>(content);
+            }
+            else
+            {
+                var rawBody = await response.Content.ReadAsStringAsync();
+                _logger.LogWarning("NSGB Sweden returned non-success {Status} for Notation {Notation}. Body: {Body}",
+                    (int)response.StatusCode, organisationNumber, rawBody);
+
+                var errorResponse = JsonConvert.DeserializeObject<NSGErrorModel>(rawBody);
 
                 if (errorResponse == null)
                 {
@@ -256,6 +452,7 @@ namespace Altinn.Dan.Plugin.Nsg
                 }
                 else
                 {
+                    _logger.LogWarning("404 source: NSGB Sweden API returned 404 (errorResponse parsed)");
                     throw new NsgException(errorResponse);
                 }
             }
@@ -369,7 +566,7 @@ namespace Altinn.Dan.Plugin.Nsg
             var url = $"{_settings.HvdTokenUrl}oauth2/token";
 
             var credentials = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{clientId}:{clientSecret}"));
-           
+
             var content = new FormUrlEncodedContent(new[]
             {
                 new KeyValuePair<string, string>("grant_type", "client_credentials"),
@@ -378,7 +575,7 @@ namespace Altinn.Dan.Plugin.Nsg
 
             using var request = new HttpRequestMessage(HttpMethod.Post, url)
             {
-                Content = content                
+                Content = content
             };
 
             request.Headers.Authorization = new AuthenticationHeaderValue("Basic", credentials);
@@ -386,7 +583,7 @@ namespace Altinn.Dan.Plugin.Nsg
             var response = await _client.SendAsync(request);
             var json = await response.Content.ReadAsStringAsync();
 
-            if(!response.IsSuccessStatusCode)
+            if (!response.IsSuccessStatusCode)
             {
                 _logger.LogError($"Failed to retrieve token from Sweden API. Status: {response.StatusCode}, Response: {json}");
                 throw new NsgException("TBD", "urn:bronnoysundregistrene:error:authentication", "authentication.failed", "",
@@ -396,15 +593,18 @@ namespace Altinn.Dan.Plugin.Nsg
             return JsonConvert.DeserializeObject<TokenResponse>(json);
         }
 
-        private async Task<RegisteredInformationResponse> MapOrgData(VerdifullDatamengdeResponse orgData)
+        private async Task<RegisteredInformationResponse> MapOrgData(VerdifullDatamengdeResponse orgData, RegisteredInformationResponse nsgbResponse)
         {
             // Sole traders bruker personnummer som identifier og kan
             // ha flere "namnskyddslöpnummer" - ett per registrert virksomhetsnavn.
             // Vardefulla datamengder-APIet returnerer  en liste, så vi velger den oppføringen med siste registreringsdato (anbefalt fra Bolagsverket).
             var orgs = orgData?.Organisationer;
             if (orgs == null || orgs.Count == 0)
+            {
+                _logger.LogWarning("404 source: VDM returned 200 but empty Organisationer list");
                 throw new NsgException("TBD", "urn:bronnoysundregistrene:error:validation", "not.found", "Notation",
                     "Organisation does not exist or has been deleted", 404, "Not found");
+            }
 
             if (orgs.Count > 1)
             {
@@ -417,13 +617,27 @@ namespace Altinn.Dan.Plugin.Nsg
                 .OrderByDescending(o => DateTime.TryParse(o.Organisationsdatum?.Registreringsdatum, out var d) ? d : DateTime.MinValue)
                 .First();
 
+            // Avregistrert organisasjon -> 404
+            if (org.AvregistreradOrganisation?.Avregistreringsdatum.HasValue == true)
+            {
+                _logger.LogWarning("404 source: organisation has Avregistreringsdatum={Date}",
+                    org.AvregistreradOrganisation.Avregistreringsdatum);
+                throw new NsgException("TBD", "urn:bronnoysundregistrene:error:validation", "not.found", "Notation",
+                    "Organisation does not exist or has been deleted", 404, "Not found");
+            }
+
             var firstName = org.Organisationsnamn?.OrganisationsnamnLista?.FirstOrDefault();
 
-            // Adresse
+            // Adresse — kommaseparert, hopp over tomme deler så vi ikke får ledende komma
             var post = org.PostadressOrganisation?.Postadress;
-            var fullAddress = post == null
-                ? null
-                : $"{post.Utdelningsadress ?? ""} {post.Postnummer} {post.Postort}".Trim();
+            string fullAddress = null;
+            if (post != null)
+            {
+                var parts = new[] { post.Utdelningsadress, post.Postnummer, post.Postort }
+                    .Where(s => !string.IsNullOrWhiteSpace(s))
+                    .ToArray();
+                fullAddress = parts.Length > 0 ? string.Join(", ", parts) : null;
+            }
 
             // Activities (SNI -> NACE: SNI er 5-sifret, NACE er 4-sifret. Kutt nasjonalt 5. siffer.)
             var activities = org.NaringsgrenOrganisation?.Sni?
@@ -449,12 +663,11 @@ namespace Altinn.Dan.Plugin.Nsg
                 ?? (string.IsNullOrWhiteSpace(org.Organisationsdatum?.Dataproducent) ? null : org.Organisationsdatum.Dataproducent)
                 ?? "Bolagsverket";
 
-            // LegalStatus: hvis det finnes en avregistreringsårsak ELLER pågående
-            // avvikling/omstrukturering -> SOME_REGISTERED. Ellers NO_REGISTERED.
+            // LegalStatus: SOME_REGISTERED hvis det finnes pågående avvikling/omstrukturering.
+            // (Hvis org var avregistrert ville vi allerede ha kastet 404 lenger oppe.)
             var hasOngoingProceedings = org.PagandeAvvecklingsEllerOmstruktureringsforfarande
                 ?.PagandeAvvecklingsEllerOmstruktureringsforfarandeLista?.Any() == true;
-            var hasDeregistrationReason = !string.IsNullOrWhiteSpace(org.Avregistreringsorsak?.Kod);
-            var legalStatusCode = (hasDeregistrationReason || hasOngoingProceedings)
+            var legalStatusCode = hasOngoingProceedings
                 ? "SOME_REGISTERED"
                 : "NO_REGISTERED";
             var legalStatusName = legalStatusCode == "NO_REGISTERED"
@@ -490,10 +703,7 @@ namespace Altinn.Dan.Plugin.Nsg
                     FullAddress = fullAddress
                 },
 
-                RegisteredAddress = new Registeredaddress
-                {
-                    FullAddress = fullAddress
-                },
+                RegisteredAddress = nsgbResponse?.RegisteredAddress,
 
                 Activity = activities ?? new List<Activity>()
             };
