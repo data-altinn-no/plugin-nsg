@@ -544,7 +544,7 @@ namespace Altinn.Dan.Plugin.Nsg
 
             response.Identifier = new Identifier()
             {
-                IssuingAuthorityName = MapIssuingAuthority("Brønnøysundregistrene"),
+                IssuingAuthorityName = "The Brønnøysund Register Centre",
                 Notation = unit.Organisasjonsnummer
             };
             response.LegalStatus = new Legalstatus();
@@ -657,13 +657,6 @@ namespace Altinn.Dan.Plugin.Nsg
                 })
                 .ToList();
 
-            // Bruk den mest sentrale tilgjengelige verdien, med Bolagsverket som siste fallback.
-            var issuingAuthority =
-                (string.IsNullOrWhiteSpace(org.Organisationsnamn?.Dataproducent) ? null : org.Organisationsnamn.Dataproducent)
-                ?? (string.IsNullOrWhiteSpace(org.Organisationsform?.Dataproducent) ? null : org.Organisationsform.Dataproducent)
-                ?? (string.IsNullOrWhiteSpace(org.Organisationsdatum?.Dataproducent) ? null : org.Organisationsdatum.Dataproducent)
-                ?? "The Swedish Tax Agency";
-
             // LegalStatus: SOME_REGISTERED hvis det finnes pågående avvikling/omstrukturering.
             // (Hvis org var avregistrert ville vi allerede ha kastet 404 lenger oppe.)
             var hasOngoingProceedings = org.PagandeAvvecklingsEllerOmstruktureringsforfarande
@@ -684,7 +677,7 @@ namespace Altinn.Dan.Plugin.Nsg
                 Identifier = new Identifier
                 {
                     Notation = org.Organisationsidentitet?.Identitetsbeteckning,
-                    IssuingAuthorityName = MapIssuingAuthority(issuingAuthority)
+                    IssuingAuthorityName = "The Swedish Tax Agency"
                 },
 
                 LegalForm = new Legalform
@@ -710,15 +703,5 @@ namespace Altinn.Dan.Plugin.Nsg
             };           
         }
 
-        private string MapIssuingAuthority(string issuingAuthority)
-        {
-            if (issuingAuthority.Contains("Brønnøysundregistrene", StringComparison.OrdinalIgnoreCase))
-                return "The Brønnøysund Register Centre";
-
-            if (issuingAuthority.Contains("Bolagsverket", StringComparison.OrdinalIgnoreCase))
-                return "The Swedish Tax Agency";
-
-            return issuingAuthority;
-        }
     }
 }
