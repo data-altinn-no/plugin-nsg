@@ -64,6 +64,13 @@ namespace Altinn.Dan.Plugin.Nsg
             var input = await req.ReadFromJsonAsync<RegisteredInformationRequest>();
             try
             {
+                if (input == null)
+                {
+                    _logger.LogWarning("registered-organisations called with empty or invalid JSON body. requestHeader={RequestHeader}", requestHeader);
+                    throw new NsgException("TBD", "urn:bronnoysundregistrene:error:validation", "invalid", "Body",
+                        "Request body is missing, empty, or not valid JSON", 400, "Invalid request body");
+                }
+
                 _logger.DanLog(LogAction.DatasetRequested, owner: "NSG", requestor: "OpenData", serviceContext: "NSG", evidenceCodeName: "Registered Organisations");
                 var info = await GetRegisteredInformation(input, requestHeader);
                 var response = req.CreateResponse();
@@ -130,7 +137,13 @@ namespace Altinn.Dan.Plugin.Nsg
             {
                 var content = await response.Content.ReadAsStringAsync();
                 _logger.LogInformation($"Successfully retrieved from Iceland for Notation {organisationNumber}");
-                return JsonConvert.DeserializeObject<RegisteredInformationResponse>(content);
+                var result = JsonConvert.DeserializeObject<RegisteredInformationResponse>(content);
+                if (result == null)
+                {
+                    throw new NsgException("TBD", "urn:bronnoysundregistrene:error:unknown", "server.error", "",
+                        "Empty or malformed response from Iceland API", (int)response.StatusCode, "Remote server error");
+                }
+                return result;
             }
             else
             {
@@ -184,7 +197,13 @@ namespace Altinn.Dan.Plugin.Nsg
             {
                 var content = await response.Content.ReadAsStringAsync();
                 _logger.LogInformation($"Successfully retrieved from Finland for Notation {organisationNumber}");
-                return JsonConvert.DeserializeObject<RegisteredInformationResponse>(content);
+                var result = JsonConvert.DeserializeObject<RegisteredInformationResponse>(content);
+                if (result == null)
+                {
+                    throw new NsgException("TBD", "urn:bronnoysundregistrene:error:unknown", "server.error", "",
+                        "Empty or malformed response from Finland API", (int)response.StatusCode, "Remote server error");
+                }
+                return result;
             }
             else
             {
@@ -273,6 +292,23 @@ namespace Altinn.Dan.Plugin.Nsg
                 throw new NsgException("TBD", "urn:bronnoysundregistrene:error:unknown", "server.error", "",
                     "Unexpected error fetching organisation data", 500, "Internal error");
             }
+        }
+
+        // Bygger en NACE Activity fra en rå Kode-streng. Returnerer null om
+        // koden er null/blank, slik at kalleren kan hoppe over den.
+        private static Activity TryCreateNaceActivity(string rawKode, int sequence)
+        {
+            if (string.IsNullOrWhiteSpace(rawKode)) return null;
+            var digits = rawKode.Replace(".", "");
+            if (string.IsNullOrEmpty(digits)) return null;
+            var naceCode = digits.Length >= 4 ? digits.Substring(0, 4) : digits;
+            return new Activity
+            {
+                code = naceCode,
+                Sequence = sequence,
+                InClassification = "http://data.europa.eu/ux2/nace2/nace2",
+                Reference = $"http://data.europa.eu/ux2/nace2/{naceCode}",
+            };
         }
 
         // Luhn-validering for svenske organisasjonsnummer og personnummer.
@@ -479,7 +515,7 @@ namespace Altinn.Dan.Plugin.Nsg
 
             var response = new RegisteredInformationResponse();
 
-            response.RegistrationDate = unit.RegistreringsdatoEnhetsregisteret!.Value.UtcDateTime.ToString("yyyy-MM-dd");
+            response.RegistrationDate = unit.RegistreringsdatoEnhetsregisteret?.UtcDateTime.ToString("yyyy-MM-dd");
             response.Name = unit.Navn;
             //identifier = "",
 
@@ -507,40 +543,24 @@ namespace Altinn.Dan.Plugin.Nsg
 
             response.LegalForm = new Legalform()
             {
-                Name = unit.Organisasjonsform.Beskrivelse,
-                Code = "NO_" + unit.Organisasjonsform.Kode
+                Name = unit.Organisasjonsform?.Beskrivelse,
+                Code = unit.Organisasjonsform?.Kode != null ? "NO_" + unit.Organisasjonsform.Kode : null
             };
             response.Activity = new List<Activity>();
 
-            if (unit.Naeringskode1 != null)
-                response.Activity.Add(
-                new Activity()
-                {
-                    code = unit.Naeringskode1.Kode.Replace(".", "").Substring(0, 4),
-                    Sequence = 1,
-                    InClassification = "http://data.europa.eu/ux2/nace2/nace2",
-                    Reference = $"http://data.europa.eu/ux2/nace2/{unit.Naeringskode1.Kode.Replace(".", "").Substring(0, 4)}",
-                });
+            // Trygg mapping av norske naeringskoder. Beskytter mot null Kode og
+            // koder kortere enn 4 tegn (Substring kaster ArgumentOutOfRangeException).
+            var activity1 = TryCreateNaceActivity(unit.Naeringskode1?.Kode, 1);
+            if (activity1 != null)
+                response.Activity.Add(activity1);
 
-            if (unit.Naeringskode2 != null)
-                response.Activity.Add(
-                    new Activity()
-                    {
-                        code = unit.Naeringskode2.Kode.Replace(".", "").Substring(0, 4),
-                        Sequence = 2,
-                        InClassification = "http://data.europa.eu/ux2/nace2/nace2",
-                        Reference = $"http://data.europa.eu/ux2/nace2/{unit.Naeringskode2.Kode.Replace(".", "").Substring(0, 4)}",
-                    });
+            var activity2 = TryCreateNaceActivity(unit.Naeringskode2?.Kode, 2);
+            if (activity2 != null)
+                response.Activity.Add(activity2);
 
-            if (unit.Naeringskode3 != null)
-                response.Activity.Add(
-                    new Activity()
-                    {
-                        code = unit.Naeringskode3.Kode.Replace(".", "").Substring(0, 4),
-                        Sequence = 3,
-                        InClassification = "http://data.europa.eu/ux2/nace2/nace2",
-                        Reference = $"http://data.europa.eu/ux2/nace2/{unit.Naeringskode3.Kode.Replace(".", "").Substring(0, 4)}",
-                    });
+            var activity3 = TryCreateNaceActivity(unit.Naeringskode3?.Kode, 3);
+            if (activity3 != null)
+                response.Activity.Add(activity3);
 
             response.Identifier = new Identifier()
             {
@@ -548,9 +568,11 @@ namespace Altinn.Dan.Plugin.Nsg
                 Notation = unit.Organisasjonsnummer
             };
             response.LegalStatus = new Legalstatus();
-            response.LegalStatus.Code = unit.UnderTvangsavviklingEllerTvangsopplosning!.Value || unit.UnderAvvikling!.Value || unit.Konkurs!.Value
-                ? "SOME"
-                : "NONE";
+            var hasExtraordinaryCircumstances =
+                (unit.UnderTvangsavviklingEllerTvangsopplosning ?? false) ||
+                (unit.UnderAvvikling ?? false) ||
+                (unit.Konkurs ?? false);
+            response.LegalStatus.Code = hasExtraordinaryCircumstances ? "SOME" : "NONE";
             response.LegalStatus.Name = response.LegalStatus.Code == "NONE"
                     ? "No extraordinary circumstances registered"
                     : "Some extraordinary circumstances registered";
