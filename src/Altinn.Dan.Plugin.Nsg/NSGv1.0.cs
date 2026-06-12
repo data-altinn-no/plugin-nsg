@@ -18,7 +18,6 @@ using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
-using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
@@ -299,7 +298,7 @@ namespace Altinn.Dan.Plugin.Nsg
             organisationNumber = new string(organisationNumber.Where(char.IsDigit).ToArray());
 
             //Get auth token
-            var token = await GenerateTokenSE();
+            var token = await GenerateTokenSE(useCache: true);
 
             var requestbody = new OrganisationerRequest()
             {
@@ -344,7 +343,7 @@ namespace Altinn.Dan.Plugin.Nsg
                 }
             }
         }
-        private async Task<TokenResponse> GetTokenSE(bool useCache = false)
+        internal async Task<TokenResponse> GetTokenSE(bool useCache = false)
         {
             if (useCache && _settings.TokenCaching)
             {
@@ -412,7 +411,7 @@ namespace Altinn.Dan.Plugin.Nsg
         {
             //Get auth token
             organisationNumber = new string(organisationNumber.Where(char.IsDigit).ToArray());
-            var token = await GetTokenSE(true);
+            var token = await GetTokenSE(true);            
 
             var requestbody = new RegisteredInformationRequest()
             {
@@ -558,8 +557,21 @@ namespace Altinn.Dan.Plugin.Nsg
             return response;
         }
 
-        private async Task<TokenResponse> GenerateTokenSE()
+        internal async Task<TokenResponse> GenerateTokenSE(bool useCache = false)
         {
+            // VDM bruker andre credentials/scope enn NSGB, så vi cacher under egen nøkkel.
+            const string CacheKey = "TokenVdmSE";
+
+            if (useCache && _settings.TokenCaching)
+            {
+                (bool hasCachedValue, TokenResponse cachedToken) = await _tokenCacheProvider.TryGetToken(CacheKey);
+                if (hasCachedValue)
+                {
+                    _logger.LogInformation("Found cached {CacheKey}", CacheKey);
+                    return cachedToken;
+                }
+            }
+
             var clientId = _settings.HvdClientId;
             var clientSecret = _settings.HvdClientSecret;
             var scope = _settings.HvdScope;
@@ -591,7 +603,22 @@ namespace Altinn.Dan.Plugin.Nsg
                     "Failed to retrieve access token from Sweden API", (int)response.StatusCode, "Authentication failed");
             }
 
-            return JsonConvert.DeserializeObject<TokenResponse>(json);
+            var token = JsonConvert.DeserializeObject<TokenResponse>(json);
+
+            if (token == null || string.IsNullOrWhiteSpace(token.AccessToken))
+            {
+                _logger.LogError("VDM token response from Bolagsverket was empty or malformed");
+                throw new NsgException("TBD", "urn:bronnoysundregistrene:error:authentication", "authentication.failed", "",
+                    "Empty or malformed VDM token response", 500, "Authentication failed");
+            }
+
+            if (_settings.TokenCaching)
+            {
+                await _tokenCacheProvider.Set(CacheKey, token,
+                    new TimeSpan(0, 0, Math.Max(0, token.ExpiresIn - 5)));
+            }
+
+            return token;
         }
 
         private async Task<RegisteredInformationResponse> MapOrgData(VerdifullDatamengdeResponse orgData, RegisteredInformationResponse nsgbResponse)
