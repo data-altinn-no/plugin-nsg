@@ -400,8 +400,9 @@ namespace Altinn.Dan.Plugin.Nsg
 
             if (useCache && _settings.TokenCaching)
             {
+                // Cache token for 59 minutes
                 await _tokenCacheProvider.Set("TokenSE", token,
-                    new TimeSpan(0, 0, Math.Max(0, token.ExpiresIn - 5)));
+                    new TimeSpan(0, 0, Math.Max(0, token.ExpiresIn - 60)));
             }
 
             return token;
@@ -614,8 +615,9 @@ namespace Altinn.Dan.Plugin.Nsg
 
             if (_settings.TokenCaching)
             {
+                // Cache token for 59 minutes
                 await _tokenCacheProvider.Set(CacheKey, token,
-                    new TimeSpan(0, 0, Math.Max(0, token.ExpiresIn - 5)));
+                    new TimeSpan(0, 0, Math.Max(0, token.ExpiresIn - 60)));
             }
 
             return token;
