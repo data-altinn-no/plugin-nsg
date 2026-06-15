@@ -656,7 +656,7 @@ namespace Altinn.Dan.Plugin.Nsg
                     "Empty or malformed VDM token response", 500, "Authentication failed");
             }
 
-            if (_settings.TokenCaching)
+            if (useCache && _settings.TokenCaching)
             {
                 // Cache token for 59 minutes
                 await _tokenCacheProvider.Set(CacheKey, token,

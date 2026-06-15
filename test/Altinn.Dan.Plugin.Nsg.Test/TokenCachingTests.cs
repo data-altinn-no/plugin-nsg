@@ -183,9 +183,10 @@ namespace Altinn.Dan.Plugin.Nsg.Test
         }
 
         [TestMethod]
-        public async Task GenerateTokenSE_DefaultParameterDoesNotReadFromCache()
+        public async Task GenerateTokenSE_DefaultParameter_SkipsBothCacheReadAndWrite()
         {
-            // Standardverdien er useCache=false, så caching skal hoppes over selv om TokenCaching=true
+            // Standardverdien er useCache=false, så caching skal hoppes over fullstendig
+            // selv om TokenCaching=true: ingen lesing OG ingen skriving.
             _cache.Storage["TokenVdmSE"] = new TokenResponse { AccessToken = "cached-vdm", ExpiresIn = 3600 };
             _mockHandler.EnqueueJsonResponse(HttpStatusCode.OK,
                 "{\"access_token\":\"fresh-vdm\",\"expires_in\":3600}");
@@ -193,7 +194,10 @@ namespace Altinn.Dan.Plugin.Nsg.Test
             var result = await _sut.GenerateTokenSE();
 
             Assert.AreEqual("fresh-vdm", result.AccessToken, "Default arg should bypass cache read");
-            Assert.AreEqual(0, _cache.TryGetCount);
+            Assert.AreEqual(0, _cache.TryGetCount, "Default arg (useCache=false) should skip cache read");
+            Assert.AreEqual(0, _cache.SetCount, "Default arg (useCache=false) should also skip cache write");
+            Assert.AreEqual("cached-vdm", _cache.Storage["TokenVdmSE"].AccessToken,
+                "Existing cache entry must remain untouched when useCache=false");
         }
     }
 
