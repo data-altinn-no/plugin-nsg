@@ -101,7 +101,13 @@ namespace Altinn.Dan.Plugin.Nsg
 
         private async Task<RegisteredInformationResponse> GetRegisteredInformation(RegisteredInformationRequest input, string headerValue)
         {
-            switch (input.Country)
+            _logger.LogInformation("GetRegisteredInformation called with Country={Country}, Notation={Notation}",
+                input.Country, input.Notation);
+
+            // Tolerér ulike casinger fra konsumenter ("no", "Se", "fi", osv.)
+            var country = input.Country?.ToUpperInvariant();
+
+            switch (country)
             {
                 case "":
                 case "NO": return await GetFromNorway(input.Notation, headerValue);
@@ -109,7 +115,9 @@ namespace Altinn.Dan.Plugin.Nsg
                 case "FI": return await GetFromFinland(input.Notation, headerValue);
                 case "IS": return await GetFromIceland(input.Notation);
                 case "DE": return await GetFromDenmark(input.Notation);
-                default: throw new EvidenceSourcePermanentClientException(1, "Invalid Country code");
+                default:
+                    _logger.LogWarning("Invalid Country code received: '{Country}'", input.Country);
+                    throw new EvidenceSourcePermanentClientException(1, "Invalid Country code");
             }
         }
 
@@ -137,13 +145,7 @@ namespace Altinn.Dan.Plugin.Nsg
             {
                 var content = await response.Content.ReadAsStringAsync();
                 _logger.LogInformation($"Successfully retrieved from Iceland for Notation {organisationNumber}");
-                var result = JsonConvert.DeserializeObject<RegisteredInformationResponse>(content);
-                if (result == null)
-                {
-                    throw new NsgException("TBD", "urn:bronnoysundregistrene:error:unknown", "server.error", "",
-                        "Empty or malformed response from Iceland API", (int)response.StatusCode, "Remote server error");
-                }
-                return result;
+                return TryDeserializeOrThrow<RegisteredInformationResponse>(content, "Iceland", organisationNumber);
             }
             else
             {
@@ -197,13 +199,7 @@ namespace Altinn.Dan.Plugin.Nsg
             {
                 var content = await response.Content.ReadAsStringAsync();
                 _logger.LogInformation($"Successfully retrieved from Finland for Notation {organisationNumber}");
-                var result = JsonConvert.DeserializeObject<RegisteredInformationResponse>(content);
-                if (result == null)
-                {
-                    throw new NsgException("TBD", "urn:bronnoysundregistrene:error:unknown", "server.error", "",
-                        "Empty or malformed response from Finland API", (int)response.StatusCode, "Remote server error");
-                }
-                return result;
+                return TryDeserializeOrThrow<RegisteredInformationResponse>(content, "Finland", organisationNumber);
             }
             else
             {
@@ -286,6 +282,32 @@ namespace Altinn.Dan.Plugin.Nsg
                 _logger.LogError(ex, "Unexpected error fetching from Sweden for Notation {Notation}", digits);
                 throw new NsgException("TBD", "urn:bronnoysundregistrene:error:unknown", "server.error", "",
                     "Unexpected error fetching organisation data", 500, "Internal error");
+            }
+        }
+
+        // Trygg deserialisering: logger body-en og kaster en pen NsgException
+        // hvis JSON-en er ugyldig (f.eks. inneholder JavaScript-literalet `undefined`,
+        // HTML feilside, tom respons, eller noe annet rart).
+        private T TryDeserializeOrThrow<T>(string content, string source, string notation) where T : class
+        {
+            try
+            {
+                var result = JsonConvert.DeserializeObject<T>(content);
+                if (result == null)
+                {
+                    _logger.LogError("Empty or null deserialization result from {Source} for Notation {Notation}. Body: {Body}",
+                        source, notation, content);
+                    throw new NsgException("TBD", "urn:bronnoysundregistrene:error:unknown", "server.error", "",
+                        $"Empty or malformed response from {source} API", 500, "Remote server error");
+                }
+                return result;
+            }
+            catch (JsonException ex)
+            {
+                _logger.LogError(ex, "Failed to deserialize response from {Source} for Notation {Notation}. Body: {Body}",
+                    source, notation, content);
+                throw new NsgException("TBD", "urn:bronnoysundregistrene:error:unknown", "server.error", "",
+                    $"Invalid JSON in response from {source} API: {ex.Message}", 500, "Remote server error");
             }
         }
 
