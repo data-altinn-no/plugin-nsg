@@ -257,17 +257,12 @@ namespace Altinn.Dan.Plugin.Nsg
 
             try
             {
+                // VDM er primær datakilde. Hvis den feiler, gir vi opp hele forespørselen.
                 var verdifullDatamengdeResponse = await GetFromVardefullaDatamangdeResponse(digits, header);
 
-                RegisteredInformationResponse nsgbResponse = null;
-                try
-                {
-                    nsgbResponse = await GetFromSwedenNSGB(digits, header);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "NSGB Sweden lookup failed for {Notation} — continuing with VDM only", digits);
-                }
+                // NSGB er sekundær — beriker svaret med registeredAddress.
+                // Returnerer null ved feil; vi fortsetter da med VDM-data alene.
+                var nsgbResponse = await GetFromSwedenNSGB(digits, header);
 
                 return await MapOrgData(verdifullDatamengdeResponse, nsgbResponse);
             }
@@ -444,54 +439,58 @@ namespace Altinn.Dan.Plugin.Nsg
             return token;
         }
 
+        /// <summary>
+        /// Best-effort lookup mot NSGB-API-et. NSGB er en sekundærkilde som
+        /// kun brukes for å berike svaret med registeredAddress (som VDM ikke har).
+        /// Returnerer null ved enhver feil — caller fortsetter med VDM-data alene.
+        /// </summary>
         private async Task<RegisteredInformationResponse> GetFromSwedenNSGB(string organisationNumber, string header)
         {
-            //Get auth token
             organisationNumber = new string(organisationNumber.Where(char.IsDigit).ToArray());
-            var token = await GetTokenSE(true);            
 
-            var requestbody = new RegisteredInformationRequest()
+            try
             {
-                Notation = organisationNumber
-            };
+                var token = await GetTokenSE(true);
 
-            var request = new HttpRequestMessage()
-            {
-                Content = new StringContent(JsonConvert.SerializeObject(requestbody), Encoding.UTF8, "application/json"),
-                Method = HttpMethod.Post,
-                RequestUri = new Uri(_settings.GetRegisteredInformationUrl("SE"))
-            };
+                var requestbody = new RegisteredInformationRequest()
+                {
+                    Notation = organisationNumber
+                };
 
-            request.Headers.TryAddWithoutValidation("Authorization", "Bearer " + token.AccessToken);
-            request.Headers.TryAddWithoutValidation("Content-Type", "application/json");
-            request.Headers.TryAddWithoutValidation("Accept", "application/json;charset=utf-8");
+                var request = new HttpRequestMessage()
+                {
+                    Content = new StringContent(JsonConvert.SerializeObject(requestbody), Encoding.UTF8, "application/json"),
+                    Method = HttpMethod.Post,
+                    RequestUri = new Uri(_settings.GetRegisteredInformationUrl("SE"))
+                };
 
-            var response = await _client.SendAsync(request);
+                request.Headers.TryAddWithoutValidation("Authorization", "Bearer " + token.AccessToken);
+                request.Headers.TryAddWithoutValidation("Content-Type", "application/json");
+                request.Headers.TryAddWithoutValidation("Accept", "application/json;charset=utf-8");
 
-            if (response.IsSuccessStatusCode)
-            {
-                var content = await response.Content.ReadAsStringAsync();
-                _logger.LogInformation($"Successfully retrieved from Sweden for Notation {organisationNumber}");
-                return JsonConvert.DeserializeObject<RegisteredInformationResponse>(content);
-            }
-            else
-            {
+                var response = await _client.SendAsync(request);
+
+                if (response.IsSuccessStatusCode)
+                {
+                    var content = await response.Content.ReadAsStringAsync();
+                    _logger.LogInformation("Successfully retrieved from NSGB for Notation {Notation}", organisationNumber);
+                    return JsonConvert.DeserializeObject<RegisteredInformationResponse>(content);
+                }
+
+                // Ikke-success — logg og returner null. NSGB er ikke kritisk, så vi unngår å
+                // kaste exception bare for at caller skal swallowe den.
                 var rawBody = await response.Content.ReadAsStringAsync();
-                _logger.LogWarning("NSGB Sweden returned non-success {Status} for Notation {Notation}. Body: {Body}",
+                _logger.LogWarning(
+                    "NSGB Sweden returned non-success {Status} for Notation {Notation} — continuing with VDM only. Body: {Body}",
                     (int)response.StatusCode, organisationNumber, rawBody);
-
-                var errorResponse = JsonConvert.DeserializeObject<NSGErrorModel>(rawBody);
-
-                if (errorResponse == null)
-                {
-                    throw new NsgException("TBD", "urn:bronnoysundregistrene:error:unknown", "server.error", "",
-                        "Could not process response from external api, " + response.ReasonPhrase, (int)response.StatusCode, "Remote server error");
-                }
-                else
-                {
-                    _logger.LogWarning("404 source: NSGB Sweden API returned 404 (errorResponse parsed)");
-                    throw new NsgException(errorResponse);
-                }
+                return null;
+            }
+            catch (Exception ex)
+            {
+                // Uventet feil (token-fetch, nettverk, deserialisering osv.). NSGB er sekundær
+                // — logg og fortsett uten å feile hele forespørselen.
+                _logger.LogWarning(ex, "NSGB Sweden lookup failed for {Notation} — continuing with VDM only", organisationNumber);
+                return null;
             }
         }
 
