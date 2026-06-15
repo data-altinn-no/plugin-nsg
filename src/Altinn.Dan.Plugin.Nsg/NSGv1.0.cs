@@ -18,7 +18,6 @@ using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
-using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
@@ -65,6 +64,13 @@ namespace Altinn.Dan.Plugin.Nsg
             var input = await req.ReadFromJsonAsync<RegisteredInformationRequest>();
             try
             {
+                if (input == null)
+                {
+                    _logger.LogWarning("registered-organisations called with empty or invalid JSON body. requestHeader={RequestHeader}", requestHeader);
+                    throw new NsgException("TBD", "urn:bronnoysundregistrene:error:validation", "invalid", "Body",
+                        "Request body is missing, empty, or not valid JSON", 400, "Invalid request body");
+                }
+
                 _logger.DanLog(LogAction.DatasetRequested, owner: "NSG", requestor: "OpenData", serviceContext: "NSG", evidenceCodeName: "Registered Organisations");
                 var info = await GetRegisteredInformation(input, requestHeader);
                 var response = req.CreateResponse();
@@ -95,7 +101,13 @@ namespace Altinn.Dan.Plugin.Nsg
 
         private async Task<RegisteredInformationResponse> GetRegisteredInformation(RegisteredInformationRequest input, string headerValue)
         {
-            switch (input.Country)
+            _logger.LogInformation("GetRegisteredInformation called with Country={Country}, Notation={Notation}",
+                input.Country, input.Notation);
+
+            // Tolerér ulike casinger fra konsumenter ("no", "Se", "fi", osv.)
+            var country = input.Country?.ToUpperInvariant();
+
+            switch (country)
             {
                 case "":
                 case "NO": return await GetFromNorway(input.Notation, headerValue);
@@ -103,7 +115,9 @@ namespace Altinn.Dan.Plugin.Nsg
                 case "FI": return await GetFromFinland(input.Notation, headerValue);
                 case "IS": return await GetFromIceland(input.Notation);
                 case "DE": return await GetFromDenmark(input.Notation);
-                default: throw new EvidenceSourcePermanentClientException(1, "Invalid Country code");
+                default:
+                    _logger.LogWarning("Invalid Country code received: '{Country}'", input.Country);
+                    throw new EvidenceSourcePermanentClientException(1, "Invalid Country code");
             }
         }
 
@@ -131,7 +145,7 @@ namespace Altinn.Dan.Plugin.Nsg
             {
                 var content = await response.Content.ReadAsStringAsync();
                 _logger.LogInformation($"Successfully retrieved from Iceland for Notation {organisationNumber}");
-                return JsonConvert.DeserializeObject<RegisteredInformationResponse>(content);
+                return TryDeserializeOrThrow<RegisteredInformationResponse>(content, "Iceland", organisationNumber);
             }
             else
             {
@@ -185,7 +199,7 @@ namespace Altinn.Dan.Plugin.Nsg
             {
                 var content = await response.Content.ReadAsStringAsync();
                 _logger.LogInformation($"Successfully retrieved from Finland for Notation {organisationNumber}");
-                return JsonConvert.DeserializeObject<RegisteredInformationResponse>(content);
+                return TryDeserializeOrThrow<RegisteredInformationResponse>(content, "Finland", organisationNumber);
             }
             else
             {
@@ -239,17 +253,12 @@ namespace Altinn.Dan.Plugin.Nsg
 
             try
             {
+                // VDM er primær datakilde. Hvis den feiler, gir vi opp hele forespørselen.
                 var verdifullDatamengdeResponse = await GetFromVardefullaDatamangdeResponse(digits, header);
 
-                RegisteredInformationResponse nsgbResponse = null;
-                try
-                {
-                    nsgbResponse = await GetFromSwedenNSGB(digits, header);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "NSGB Sweden lookup failed for {Notation} — continuing with VDM only", digits);
-                }
+                // NSGB er sekundær — beriker svaret med registeredAddress.
+                // Returnerer null ved feil; vi fortsetter da med VDM-data alene.
+                var nsgbResponse = await GetFromSwedenNSGB(digits, header);
 
                 return await MapOrgData(verdifullDatamengdeResponse, nsgbResponse);
             }
@@ -276,6 +285,49 @@ namespace Altinn.Dan.Plugin.Nsg
             }
         }
 
+        // Trygg deserialisering: logger body-en og kaster en pen NsgException
+        // hvis JSON-en er ugyldig (f.eks. inneholder JavaScript-literalet `undefined`,
+        // HTML feilside, tom respons, eller noe annet rart).
+        private T TryDeserializeOrThrow<T>(string content, string source, string notation) where T : class
+        {
+            try
+            {
+                var result = JsonConvert.DeserializeObject<T>(content);
+                if (result == null)
+                {
+                    _logger.LogError("Empty or null deserialization result from {Source} for Notation {Notation}. Body: {Body}",
+                        source, notation, content);
+                    throw new NsgException("TBD", "urn:bronnoysundregistrene:error:unknown", "server.error", "",
+                        $"Empty or malformed response from {source} API", 500, "Remote server error");
+                }
+                return result;
+            }
+            catch (JsonException ex)
+            {
+                _logger.LogError(ex, "Failed to deserialize response from {Source} for Notation {Notation}. Body: {Body}",
+                    source, notation, content);
+                throw new NsgException("TBD", "urn:bronnoysundregistrene:error:unknown", "server.error", "",
+                    $"Invalid JSON in response from {source} API: {ex.Message}", 500, "Remote server error");
+            }
+        }
+
+        // Bygger en NACE Activity fra en rå Kode-streng. Returnerer null om
+        // koden er null/blank, slik at kalleren kan hoppe over den.
+        private static Activity TryCreateNaceActivity(string rawKode, int sequence)
+        {
+            if (string.IsNullOrWhiteSpace(rawKode)) return null;
+            var digits = rawKode.Replace(".", "");
+            if (string.IsNullOrEmpty(digits)) return null;
+            var naceCode = digits.Length >= 4 ? digits.Substring(0, 4) : digits;
+            return new Activity
+            {
+                code = naceCode,
+                Sequence = sequence,
+                InClassification = "http://data.europa.eu/ux2/nace2/nace2",
+                Reference = $"http://data.europa.eu/ux2/nace2/{naceCode}",
+            };
+        }
+
         // Luhn-validering for svenske organisasjonsnummer og personnummer.
         // Bruker siste 10 siffer (dropper århundre for 12-sifret personnummer).
         private static bool IsValidSwedishCheckDigit(string digitsOnly)
@@ -299,7 +351,7 @@ namespace Altinn.Dan.Plugin.Nsg
             organisationNumber = new string(organisationNumber.Where(char.IsDigit).ToArray());
 
             //Get auth token
-            var token = await GenerateTokenSE();
+            var token = await GenerateTokenSE(useCache: true);
 
             var requestbody = new OrganisationerRequest()
             {
@@ -344,7 +396,7 @@ namespace Altinn.Dan.Plugin.Nsg
                 }
             }
         }
-        private async Task<TokenResponse> GetTokenSE(bool useCache = false)
+        internal async Task<TokenResponse> GetTokenSE(bool useCache = false)
         {
             if (useCache && _settings.TokenCaching)
             {
@@ -401,61 +453,66 @@ namespace Altinn.Dan.Plugin.Nsg
 
             if (useCache && _settings.TokenCaching)
             {
+                // Cache token for 59 minutes
                 await _tokenCacheProvider.Set("TokenSE", token,
-                    new TimeSpan(0, 0, Math.Max(0, token.ExpiresIn - 5)));
+                    new TimeSpan(0, 0, Math.Max(0, token.ExpiresIn - 60)));
             }
 
             return token;
         }
 
+        /// <summary>
+        /// Best-effort lookup mot NSGB-API-et. NSGB er en sekundærkilde som
+        /// kun brukes for å berike svaret med registeredAddress (som VDM ikke har).
+        /// Returnerer null ved enhver feil — caller fortsetter med VDM-data alene.
+        /// </summary>
         private async Task<RegisteredInformationResponse> GetFromSwedenNSGB(string organisationNumber, string header)
         {
-            //Get auth token
             organisationNumber = new string(organisationNumber.Where(char.IsDigit).ToArray());
-            var token = await GetTokenSE(true);
 
-            var requestbody = new RegisteredInformationRequest()
+            try
             {
-                Notation = organisationNumber
-            };
+                var token = await GetTokenSE(true);
 
-            var request = new HttpRequestMessage()
-            {
-                Content = new StringContent(JsonConvert.SerializeObject(requestbody), Encoding.UTF8, "application/json"),
-                Method = HttpMethod.Post,
-                RequestUri = new Uri(_settings.GetRegisteredInformationUrl("SE"))
-            };
+                var requestbody = new RegisteredInformationRequest()
+                {
+                    Notation = organisationNumber
+                };
 
-            request.Headers.TryAddWithoutValidation("Authorization", "Bearer " + token.AccessToken);
-            request.Headers.TryAddWithoutValidation("Content-Type", "application/json");
-            request.Headers.TryAddWithoutValidation("Accept", "application/json;charset=utf-8");
+                var request = new HttpRequestMessage()
+                {
+                    Content = new StringContent(JsonConvert.SerializeObject(requestbody), Encoding.UTF8, "application/json"),
+                    Method = HttpMethod.Post,
+                    RequestUri = new Uri(_settings.GetRegisteredInformationUrl("SE"))
+                };
 
-            var response = await _client.SendAsync(request);
+                request.Headers.TryAddWithoutValidation("Authorization", "Bearer " + token.AccessToken);
+                request.Headers.TryAddWithoutValidation("Content-Type", "application/json");
+                request.Headers.TryAddWithoutValidation("Accept", "application/json;charset=utf-8");
 
-            if (response.IsSuccessStatusCode)
-            {
-                var content = await response.Content.ReadAsStringAsync();
-                _logger.LogInformation($"Successfully retrieved from Sweden for Notation {organisationNumber}");
-                return JsonConvert.DeserializeObject<RegisteredInformationResponse>(content);
-            }
-            else
-            {
+                var response = await _client.SendAsync(request);
+
+                if (response.IsSuccessStatusCode)
+                {
+                    var content = await response.Content.ReadAsStringAsync();
+                    _logger.LogInformation("Successfully retrieved from NSGB for Notation {Notation}", organisationNumber);
+                    return JsonConvert.DeserializeObject<RegisteredInformationResponse>(content);
+                }
+
+                // Ikke-success — logg og returner null. NSGB er ikke kritisk, så vi unngår å
+                // kaste exception bare for at caller skal swallowe den.
                 var rawBody = await response.Content.ReadAsStringAsync();
-                _logger.LogWarning("NSGB Sweden returned non-success {Status} for Notation {Notation}. Body: {Body}",
+                _logger.LogWarning(
+                    "NSGB Sweden returned non-success {Status} for Notation {Notation} — continuing with VDM only. Body: {Body}",
                     (int)response.StatusCode, organisationNumber, rawBody);
-
-                var errorResponse = JsonConvert.DeserializeObject<NSGErrorModel>(rawBody);
-
-                if (errorResponse == null)
-                {
-                    throw new NsgException("TBD", "urn:bronnoysundregistrene:error:unknown", "server.error", "",
-                        "Could not process response from external api, " + response.ReasonPhrase, (int)response.StatusCode, "Remote server error");
-                }
-                else
-                {
-                    _logger.LogWarning("404 source: NSGB Sweden API returned 404 (errorResponse parsed)");
-                    throw new NsgException(errorResponse);
-                }
+                return null;
+            }
+            catch (Exception ex)
+            {
+                // Uventet feil (token-fetch, nettverk, deserialisering osv.). NSGB er sekundær
+                // — logg og fortsett uten å feile hele forespørselen.
+                _logger.LogWarning(ex, "NSGB Sweden lookup failed for {Notation} — continuing with VDM only", organisationNumber);
+                return null;
             }
         }
 
@@ -479,7 +536,7 @@ namespace Altinn.Dan.Plugin.Nsg
 
             var response = new RegisteredInformationResponse();
 
-            response.RegistrationDate = unit.RegistreringsdatoEnhetsregisteret!.Value.UtcDateTime.ToString("yyyy-MM-dd");
+            response.RegistrationDate = unit.RegistreringsdatoEnhetsregisteret?.UtcDateTime.ToString("yyyy-MM-dd");
             response.Name = unit.Navn;
             //identifier = "",
 
@@ -507,40 +564,24 @@ namespace Altinn.Dan.Plugin.Nsg
 
             response.LegalForm = new Legalform()
             {
-                Name = unit.Organisasjonsform.Beskrivelse,
-                Code = "NO_" + unit.Organisasjonsform.Kode
+                Name = unit.Organisasjonsform?.Beskrivelse,
+                Code = unit.Organisasjonsform?.Kode != null ? "NO_" + unit.Organisasjonsform.Kode : null
             };
             response.Activity = new List<Activity>();
 
-            if (unit.Naeringskode1 != null)
-                response.Activity.Add(
-                new Activity()
-                {
-                    code = unit.Naeringskode1.Kode.Replace(".", "").Substring(0, 4),
-                    Sequence = 1,
-                    InClassification = "http://data.europa.eu/ux2/nace2/nace2",
-                    Reference = $"http://data.europa.eu/ux2/nace2/{unit.Naeringskode1.Kode.Replace(".", "").Substring(0, 4)}",
-                });
+            // Trygg mapping av norske naeringskoder. Beskytter mot null Kode og
+            // koder kortere enn 4 tegn (Substring kaster ArgumentOutOfRangeException).
+            var activity1 = TryCreateNaceActivity(unit.Naeringskode1?.Kode, 1);
+            if (activity1 != null)
+                response.Activity.Add(activity1);
 
-            if (unit.Naeringskode2 != null)
-                response.Activity.Add(
-                    new Activity()
-                    {
-                        code = unit.Naeringskode2.Kode.Replace(".", "").Substring(0, 4),
-                        Sequence = 2,
-                        InClassification = "http://data.europa.eu/ux2/nace2/nace2",
-                        Reference = $"http://data.europa.eu/ux2/nace2/{unit.Naeringskode2.Kode.Replace(".", "").Substring(0, 4)}",
-                    });
+            var activity2 = TryCreateNaceActivity(unit.Naeringskode2?.Kode, 2);
+            if (activity2 != null)
+                response.Activity.Add(activity2);
 
-            if (unit.Naeringskode3 != null)
-                response.Activity.Add(
-                    new Activity()
-                    {
-                        code = unit.Naeringskode3.Kode.Replace(".", "").Substring(0, 4),
-                        Sequence = 3,
-                        InClassification = "http://data.europa.eu/ux2/nace2/nace2",
-                        Reference = $"http://data.europa.eu/ux2/nace2/{unit.Naeringskode3.Kode.Replace(".", "").Substring(0, 4)}",
-                    });
+            var activity3 = TryCreateNaceActivity(unit.Naeringskode3?.Kode, 3);
+            if (activity3 != null)
+                response.Activity.Add(activity3);
 
             response.Identifier = new Identifier()
             {
@@ -548,9 +589,11 @@ namespace Altinn.Dan.Plugin.Nsg
                 Notation = unit.Organisasjonsnummer
             };
             response.LegalStatus = new Legalstatus();
-            response.LegalStatus.Code = unit.UnderTvangsavviklingEllerTvangsopplosning!.Value || unit.UnderAvvikling!.Value || unit.Konkurs!.Value
-                ? "SOME"
-                : "NONE";
+            var hasExtraordinaryCircumstances =
+                (unit.UnderTvangsavviklingEllerTvangsopplosning ?? false) ||
+                (unit.UnderAvvikling ?? false) ||
+                (unit.Konkurs ?? false);
+            response.LegalStatus.Code = hasExtraordinaryCircumstances ? "SOME" : "NONE";
             response.LegalStatus.Name = response.LegalStatus.Code == "NONE"
                     ? "No extraordinary circumstances registered"
                     : "Some extraordinary circumstances registered";
@@ -558,8 +601,21 @@ namespace Altinn.Dan.Plugin.Nsg
             return response;
         }
 
-        private async Task<TokenResponse> GenerateTokenSE()
+        internal async Task<TokenResponse> GenerateTokenSE(bool useCache = false)
         {
+            // VDM bruker andre credentials/scope enn NSGB, så vi cacher under egen nøkkel.
+            const string CacheKey = "TokenVdmSE";
+
+            if (useCache && _settings.TokenCaching)
+            {
+                (bool hasCachedValue, TokenResponse cachedToken) = await _tokenCacheProvider.TryGetToken(CacheKey);
+                if (hasCachedValue)
+                {
+                    _logger.LogInformation("Found cached {CacheKey}", CacheKey);
+                    return cachedToken;
+                }
+            }
+
             var clientId = _settings.HvdClientId;
             var clientSecret = _settings.HvdClientSecret;
             var scope = _settings.HvdScope;
@@ -591,7 +647,23 @@ namespace Altinn.Dan.Plugin.Nsg
                     "Failed to retrieve access token from Sweden API", (int)response.StatusCode, "Authentication failed");
             }
 
-            return JsonConvert.DeserializeObject<TokenResponse>(json);
+            var token = JsonConvert.DeserializeObject<TokenResponse>(json);
+
+            if (token == null || string.IsNullOrWhiteSpace(token.AccessToken))
+            {
+                _logger.LogError("VDM token response from Bolagsverket was empty or malformed");
+                throw new NsgException("TBD", "urn:bronnoysundregistrene:error:authentication", "authentication.failed", "",
+                    "Empty or malformed VDM token response", 500, "Authentication failed");
+            }
+
+            if (useCache && _settings.TokenCaching)
+            {
+                // Cache token for 59 minutes
+                await _tokenCacheProvider.Set(CacheKey, token,
+                    new TimeSpan(0, 0, Math.Max(0, token.ExpiresIn - 60)));
+            }
+
+            return token;
         }
 
         private async Task<RegisteredInformationResponse> MapOrgData(VerdifullDatamengdeResponse orgData, RegisteredInformationResponse nsgbResponse)
