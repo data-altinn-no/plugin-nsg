@@ -9,6 +9,7 @@ using Dan.Common.Models;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 
 namespace Altinn.Dan.Plugin.Nsg;
 
@@ -38,11 +39,27 @@ public class EvidenceSourceMetadata : IEvidenceSourceMetadata
                     {
                         EvidenceValueName = "default",
                         ValueType = EvidenceValueType.JsonSchema,
-                        JsonSchemaDefintion = EvidenceValue.SchemaFromObject<CompanyInformation>(Formatting.Indented)
+                        JsonSchemaDefintion = GetCompanyInformationSchema()
                     }
                 }
             }
         };
+    }
+
+    // CompanyInformation.RegistrationDate is a DateTimeOffset serialized as a plain yyyy-MM-dd date
+    // (see the DateFormatConverter on the property in CompanyInformation.cs), but reflection-based
+    // schema generation from the CLR type defaults to "format": "date-time" for DateTimeOffset.
+    // Override it here so the published schema matches the actual wire format.
+    private static string GetCompanyInformationSchema()
+    {
+        var schema = JObject.Parse(EvidenceValue.SchemaFromObject<CompanyInformation>(Formatting.Indented));
+
+        if (schema.SelectToken("properties.registrationDate") is JObject registrationDate)
+        {
+            registrationDate["format"] = "date";
+        }
+
+        return schema.ToString(Formatting.Indented);
     }
 
     [Function(Constants.EvidenceSourceMetadataFunctionName)]
