@@ -1,14 +1,15 @@
 using System.Collections.Generic;
-using System.IO;
 using System.Net;
-using System.Text.RegularExpressions;
 using System.Threading.Tasks;
+using Altinn.Dan.Plugin.Nsg.Models;
 using Dan.Common;
 using Dan.Common.Enums;
 using Dan.Common.Interfaces;
 using Dan.Common.Models;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 
 namespace Altinn.Dan.Plugin.Nsg;
 
@@ -38,11 +39,27 @@ public class EvidenceSourceMetadata : IEvidenceSourceMetadata
                     {
                         EvidenceValueName = "default",
                         ValueType = EvidenceValueType.JsonSchema,
-                        JsonSchemaDefintion = GetSchemaDef()
+                        JsonSchemaDefintion = GetCompanyInformationSchema()
                     }
                 }
             }
         };
+    }
+
+    // CompanyInformation.RegistrationDate is a DateTimeOffset serialized as a plain yyyy-MM-dd date
+    // (see the DateFormatConverter on the property in CompanyInformation.cs), but reflection-based
+    // schema generation from the CLR type defaults to "format": "date-time" for DateTimeOffset.
+    // Override it here so the published schema matches the actual wire format.
+    private static string GetCompanyInformationSchema()
+    {
+        var schema = JObject.Parse(EvidenceValue.SchemaFromObject<CompanyInformation>(Formatting.Indented));
+
+        if (schema.SelectToken("properties.registrationDate") is JObject registrationDate)
+        {
+            registrationDate["format"] = "date";
+        }
+
+        return schema.ToString(Formatting.Indented);
     }
 
     [Function(Constants.EvidenceSourceMetadataFunctionName)]
@@ -53,12 +70,5 @@ public class EvidenceSourceMetadata : IEvidenceSourceMetadata
         var response = req.CreateResponse(HttpStatusCode.OK);
         await response.WriteAsJsonAsync(GetEvidenceCodes());
         return response;
-    }
-
-
-    private string GetSchemaDef()
-    {
-        var def = File.ReadAllText("Models/schema.json");
-        return Regex.Replace(def, " {2,}|\r\n", "");
     }
 }
