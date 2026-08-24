@@ -311,6 +311,32 @@ namespace Altinn.Dan.Plugin.Nsg
             }
         }
 
+        // Bolagsverkets "org finnes ikke"-signal er innbakt i et 200-svar der subfeltene
+        // har fel.typ = "ORGANISATION_FINNS_EJ". Vi sjekker flere subfelt for å være robust
+        // mot varierende svar (samme fel-typ dukker opp på flere sub-objekter i praksis).
+        private static bool IsOrganisationNotFoundShell(Organisasjon org)
+        {
+            const string NotFoundErrorType = "ORGANISATION_FINNS_EJ";
+            return org.AvregistreradOrganisation?.Fel?.Typ == NotFoundErrorType
+                || org.Avregistreringsorsak?.Fel?.Typ == NotFoundErrorType
+                || org.Organisationsnamn?.Fel?.Typ == NotFoundErrorType
+                || org.Organisationsform?.Fel?.Typ == NotFoundErrorType;
+        }
+
+        // Bruk semikolon som skilletegn
+        private static string BuildAddress(IEnumerable<string> streetLines, string postnummer, string poststed, string country)
+        {
+            var streetPart = streetLines == null
+                ? null
+                : string.Join(";", streetLines.Where(s => !string.IsNullOrWhiteSpace(s)));
+            var postnummerAndSted = string.Join(" ",
+                new[] { postnummer, poststed }.Where(s => !string.IsNullOrWhiteSpace(s)));
+
+            var parts = new[] { streetPart, postnummerAndSted, country }
+                .Where(s => !string.IsNullOrWhiteSpace(s));
+            return string.Join(";", parts);
+        }
+
         // Bygger en NACE Activity fra en rå Kode-streng. Returnerer null om
         // koden er null/blank, slik at kalleren kan hoppe over den.
         private static Activity TryCreateNaceActivity(string rawKode, int sequence)
@@ -544,10 +570,11 @@ namespace Altinn.Dan.Plugin.Nsg
             {
                 response.RegisteredAddress = new Registeredaddress()
                 {
-                    FullAddress = string.Join(',', unit.Forretningsadresse!.Adresse)
-                                  + ", " + unit.Forretningsadresse!.Postnummer
-                                  + ", " + unit.Forretningsadresse!.Poststed
-                                  + ", " + CountryCodesHelper.GetByCode(unit.Forretningsadresse!.Landkode)
+                    FullAddress = BuildAddress(
+                        unit.Forretningsadresse.Adresse,
+                        unit.Forretningsadresse.Postnummer,
+                        unit.Forretningsadresse.Poststed,
+                        CountryCodesHelper.GetByCode(unit.Forretningsadresse.Landkode))
                 };
             }
 
@@ -555,10 +582,11 @@ namespace Altinn.Dan.Plugin.Nsg
             {
                 response.PostalAddress = new Postaladdress()
                 {
-                    FullAddress = string.Join(',', unit!.Postadresse!.Adresse)
-                                  + ", " + unit!.Postadresse!.Postnummer
-                                  + ", " + unit!.Postadresse!.Poststed
-                                  + ", " + CountryCodesHelper.GetByCode(unit!.Postadresse!.Landkode)
+                    FullAddress = BuildAddress(
+                        unit.Postadresse.Adresse,
+                        unit.Postadresse.Postnummer,
+                        unit.Postadresse.Poststed,
+                        CountryCodesHelper.GetByCode(unit.Postadresse.Landkode))
                 };
             }
 
@@ -690,6 +718,14 @@ namespace Altinn.Dan.Plugin.Nsg
                 .OrderByDescending(o => DateTime.TryParse(o.Organisationsdatum?.Registreringsdatum, out var d) ? d : DateTime.MinValue)
                 .First();
 
+            // Bolagsverket returnerer 200 med et "skall"-objekt når orgen ikke finnes. Return 404 i stedet.
+            if (IsOrganisationNotFoundShell(org))
+            {
+                _logger.LogWarning("404 source: VDM returned shell response with ORGANISATION_FINNS_EJ for identifier");
+                throw new NsgException("TBD", "urn:bronnoysundregistrene:error:validation", "not.found", "Notation",
+                    "Organisation does not exist or has been deleted", 404, "Not found");
+            }
+
             // Avregistrert organisasjon -> 404
             if (org.AvregistreradOrganisation?.Avregistreringsdatum.HasValue == true)
             {
@@ -701,15 +737,12 @@ namespace Altinn.Dan.Plugin.Nsg
 
             var firstName = org.Organisationsnamn?.OrganisationsnamnLista?.FirstOrDefault();
 
-            // Adresse — kommaseparert, hopp over tomme deler så vi ikke får ledende komma
             var post = org.PostadressOrganisation?.Postadress;
             string fullAddress = null;
             if (post != null)
-            {
-                var parts = new[] { post.Utdelningsadress, post.Postnummer, post.Postort }
-                    .Where(s => !string.IsNullOrWhiteSpace(s))
-                    .ToArray();
-                fullAddress = parts.Length > 0 ? string.Join(", ", parts) : null;
+            {                
+                var built = BuildAddress(new[] { post.Utdelningsadress }, post.Postnummer, post.Postort, country: null);
+                fullAddress = string.IsNullOrWhiteSpace(built) ? null : built;
             }
 
             // Activities (SNI -> NACE: SNI er 5-sifret, NACE er 4-sifret. Kutt nasjonalt 5. siffer.)
