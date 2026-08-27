@@ -696,9 +696,16 @@ namespace Altinn.Dan.Plugin.Nsg
 
         private async Task<RegisteredInformationResponse> MapOrgData(VerdifullDatamengdeResponse orgData, RegisteredInformationResponse nsgbResponse)
         {
-            // Sole traders bruker personnummer som identifier og kan
-            // ha flere "namnskyddslöpnummer" - ett per registrert virksomhetsnavn.
-            // Vardefulla datamengder-APIet returnerer  en liste, så vi velger den oppføringen med siste registreringsdato (anbefalt fra Bolagsverket).
+            // Svenske enkeltpersonforetak (enskild näringsverksamhet) kan ha flere
+            // aktive registreringer (trade names) knyttet til samme legal entity.
+            // Mappings-reglene (avklart med svensk side):
+            //   1. Filtrer ut avregistrerte registreringer. Det inkluderer not found.
+            //   2. identitetsbeteckning skal mappes til legalIdentifier. Samme legal identifier brukes for alle registreringer assosiert med samme legal identity.
+            //   3. Name = navnene fra alle aktive registeringer, semikolon-separert i responsens rekkefølge.
+            //   4. Activity = union av alle aktivitetskoder, deduplisert på kode vises bare en gang; sequence 1..N i responsens rekkefølge.
+            //   5. RegistrationDate = eldste aktive registreringsdato.
+            //   6. postalAddress = fra første aktive registrering (registeredAddress fra NSGB som før).
+            //   7. LegalStatus = SOME_REGISTERED hvis noen aktiv registrering har extraordinary circumstances.
             var orgs = orgData?.Organisationer;
             if (orgs == null || orgs.Count == 0)
             {
@@ -707,88 +714,97 @@ namespace Altinn.Dan.Plugin.Nsg
                     "Organisation does not exist or has been deleted", 404, "Not found");
             }
 
-            if (orgs.Count > 1)
+            // Rule 1: filtrer bort avregistrerte registreringer
+            var activeOrgs = orgs
+                .Where(o => !IsOrganisationNotFoundShell(o))
+                .Where(o => o.AvregistreradOrganisation?.Avregistreringsdatum.HasValue != true)
+                .ToList();
+
+            if (activeOrgs.Count == 0)
+            {
+                _logger.LogWarning("404 source: no active registrations after filtering shell/deregistered entries (had {Count} total)", orgs.Count);
+                throw new NsgException("TBD", "urn:bronnoysundregistrene:error:validation", "not.found", "Notation",
+                    "Organisation does not exist or has been deleted", 404, "Not found");
+            }
+
+            if (activeOrgs.Count > 1)
             {
                 _logger.LogInformation(
-                    "Bolagsverket returnerte {Count} oppføringer (sole trader med flere namnskyddslöpnummer). Velger nyeste registreringsdato.",
-                    orgs.Count);
+                    "Bolagsverket returnerte {Count} aktive registreringer (sole trader med flere trade names). Aggregerer navn og aktiviteter.",
+                    activeOrgs.Count);
             }
 
-            var org = orgs
-                .OrderByDescending(o => DateTime.TryParse(o.Organisationsdatum?.Registreringsdatum, out var d) ? d : DateTime.MinValue)
-                .First();
+            var firstOrg = activeOrgs[0];
 
-            // Bolagsverket returnerer 200 med et "skall"-objekt når orgen ikke finnes. Return 404 i stedet.
-            if (IsOrganisationNotFoundShell(org))
-            {
-                _logger.LogWarning("404 source: VDM returned shell response with ORGANISATION_FINNS_EJ for identifier");
-                throw new NsgException("TBD", "urn:bronnoysundregistrene:error:validation", "not.found", "Notation",
-                    "Organisation does not exist or has been deleted", 404, "Not found");
-            }
+            // Rule 3: aggreger navn — første navn per aktiv registrering, semikolon-separert
+            var aggregatedName = string.Join(";", activeOrgs
+                .Select(o => o.Organisationsnamn?.OrganisationsnamnLista?.FirstOrDefault()?.Namn)
+                .Where(name => !string.IsNullOrWhiteSpace(name)));
 
-            // Avregistrert organisasjon -> 404
-            if (org.AvregistreradOrganisation?.Avregistreringsdatum.HasValue == true)
-            {
-                _logger.LogWarning("404 source: organisation has Avregistreringsdatum={Date}",
-                    org.AvregistreradOrganisation.Avregistreringsdatum);
-                throw new NsgException("TBD", "urn:bronnoysundregistrene:error:validation", "not.found", "Notation",
-                    "Organisation does not exist or has been deleted", 404, "Not found");
-            }
-
-            var firstName = org.Organisationsnamn?.OrganisationsnamnLista?.FirstOrDefault();
-
-            var post = org.PostadressOrganisation?.Postadress;
+            // Rule 6: adresse fra første aktive registrering
+            var post = firstOrg.PostadressOrganisation?.Postadress;
             string fullAddress = null;
             if (post != null)
-            {                
+            {
                 var built = BuildAddress(new[] { post.Utdelningsadress }, post.Postnummer, post.Postort, country: null);
                 fullAddress = string.IsNullOrWhiteSpace(built) ? null : built;
             }
 
-            // Activities (SNI -> NACE: SNI er 5-sifret, NACE er 4-sifret. Kutt nasjonalt 5. siffer.)
-            var activities = org.NaringsgrenOrganisation?.Sni?
-                .Where(sni => !string.IsNullOrWhiteSpace(sni.Kod))
-                .Select((sni, index) =>
+            // Rule 4: aggreger aktiviteter, deduplisert på NACE-kode
+            var activities = new List<Activity>();
+            var seenCodes = new HashSet<string>();
+            foreach (var org in activeOrgs)
+            {
+                var snis = org.NaringsgrenOrganisation?.Sni;
+                if (snis == null) continue;
+                foreach (var sni in snis.Where(s => !string.IsNullOrWhiteSpace(s.Kod)))
                 {
-                    var digits = sni.Kod?.Replace(".", "");
+                    var digits = sni.Kod.Replace(".", "");
+                    if (string.IsNullOrEmpty(digits)) continue;
                     var naceCode = digits.Length >= 4 ? digits.Substring(0, 4) : digits;
-                    return new Activity
+                    if (!seenCodes.Add(naceCode)) continue;
+                    activities.Add(new Activity
                     {
                         code = naceCode,
                         InClassification = "http://data.europa.eu/ux2/nace2/nace2",
                         Reference = $"http://data.europa.eu/ux2/nace2/{naceCode}",
-                        Sequence = index + 1
-                    };
-                })
-                .ToList();
+                        Sequence = activities.Count + 1
+                    });
+                }
+            }
 
-            // LegalStatus: SOME_REGISTERED hvis det finnes pågående avvikling/omstrukturering.
-            // (Hvis org var avregistrert ville vi allerede ha kastet 404 lenger oppe.)
-            var hasOngoingProceedings = org.PagandeAvvecklingsEllerOmstruktureringsforfarande
-                ?.PagandeAvvecklingsEllerOmstruktureringsforfarandeLista?.Any() == true;
-            var legalStatusCode = hasOngoingProceedings
-                ? "SOME_REGISTERED"
-                : "NO_REGISTERED";
+            // Rule 5: eldste aktive registreringsdato
+            var oldestOrg = activeOrgs
+                .OrderBy(o => DateTime.TryParse(o.Organisationsdatum?.Registreringsdatum, out var d) ? d : DateTime.MaxValue)
+                .First();
+            var registrationDate = oldestOrg.Organisationsdatum?.Registreringsdatum;
+
+            // Rule 7: SOME_REGISTERED hvis noen aktiv registrering har pågående prosesser
+            var hasOngoingProceedings = activeOrgs.Any(o =>
+                o.PagandeAvvecklingsEllerOmstruktureringsforfarande
+                    ?.PagandeAvvecklingsEllerOmstruktureringsforfarandeLista?.Any() == true);
+            var legalStatusCode = hasOngoingProceedings ? "SOME_REGISTERED" : "NO_REGISTERED";
             var legalStatusName = legalStatusCode == "NO_REGISTERED"
-                ? "No extraordinary circumstances registered"
-                : "Some extraordinary circumstances registered";
+                ? "No circumstances registered"
+                : "Some circumstances registered";
 
             return new RegisteredInformationResponse
             {
-                Name = firstName?.Namn,
+                Name = string.IsNullOrEmpty(aggregatedName) ? null : aggregatedName,
 
-                RegistrationDate = org.Organisationsdatum?.Registreringsdatum,
+                RegistrationDate = registrationDate,
 
+                // Rule 2: legalIdentifier fra første aktive (samme for alle uansett)
                 Identifier = new Identifier
                 {
-                    Notation = org.Organisationsidentitet?.Identitetsbeteckning,
+                    Notation = firstOrg.Organisationsidentitet?.Identitetsbeteckning,
                     IssuingAuthorityName = "The Swedish Tax Agency"
                 },
 
                 LegalForm = new Legalform
                 {
-                    Code = org.Organisationsform?.Kod != null ? "SE_" + org.Organisationsform.Kod : null,
-                    Name = org.Organisationsform?.Klartext
+                    Code = firstOrg.Organisationsform?.Kod != null ? "SE_" + firstOrg.Organisationsform.Kod : null,
+                    Name = firstOrg.Organisationsform?.Klartext
                 },
 
                 LegalStatus = new Legalstatus
@@ -804,8 +820,8 @@ namespace Altinn.Dan.Plugin.Nsg
 
                 RegisteredAddress = nsgbResponse?.RegisteredAddress,
 
-                Activity = activities ?? new List<Activity>()
-            };           
+                Activity = activities
+            };
         }
 
     }
