@@ -1,7 +1,4 @@
-using Dan.Common.Enums;
 using System;
-using System.Collections.Generic;
-using System.Text;
 
 namespace Altinn.Dan.Plugin.Nsg.Exceptions
 {
@@ -28,8 +25,8 @@ namespace Altinn.Dan.Plugin.Nsg.Exceptions
         {
             Instance = error.instance;
             Status = error.status;
-            Timestamp = error.timestamp;
-            RequestId= error.requestId;
+            Timestamp = error.timestamp ?? DateTime.UtcNow;
+            RequestId = error.requestId;
             Title = error.title;
             Detail = error.detail;
         }
