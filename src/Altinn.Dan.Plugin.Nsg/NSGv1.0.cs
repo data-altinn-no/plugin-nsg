@@ -528,7 +528,7 @@ namespace Altinn.Dan.Plugin.Nsg
                 // Ikke-success — logg og returner null. NSGB er ikke kritisk, så vi unngår å
                 // kaste exception bare for at caller skal swallowe den.
                 var rawBody = await response.Content.ReadAsStringAsync();
-                _logger.LogWarning(
+                _logger.LogInformation(
                     "NSGB Sweden returned non-success {Status} for Notation {Notation} — continuing with VDM only. Body: {Body}",
                     (int)response.StatusCode, organisationNumber, rawBody);
                 return null;
