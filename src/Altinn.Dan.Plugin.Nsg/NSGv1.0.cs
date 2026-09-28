@@ -741,12 +741,19 @@ namespace Altinn.Dan.Plugin.Nsg
                 .Select(o => o.Organisationsnamn?.OrganisationsnamnLista?.FirstOrDefault()?.Namn)
                 .Where(name => !string.IsNullOrWhiteSpace(name)));
 
-            // Rule 6: adresse fra første aktive registrering
+            // Rule 6: adresse fra første aktive registrering.
+            // C/O-adressen (post.CoAdress) skal med som første linje foran gateadressen
+            // per svensk postkonvensjon — ellers mister vi info om at f.eks. en enkeltpersonforetaker
+            // sitter hos "c/o [firma]".
             var post = firstOrg.PostadressOrganisation?.Postadress;
             string fullAddress = null;
             if (post != null)
             {
-                var built = BuildAddress(new[] { post.Utdelningsadress }, post.Postnummer, post.Postort, country: null);
+                var built = BuildAddress(
+                    new[] { post.CoAdress, post.Utdelningsadress },
+                    post.Postnummer,
+                    post.Postort,
+                    country: null);
                 fullAddress = string.IsNullOrWhiteSpace(built) ? null : built;
             }
 
