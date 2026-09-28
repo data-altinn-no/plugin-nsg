@@ -7,6 +7,10 @@
     },
     "telemetryMode": "OpenTelemetry",
     "logging": {
+        "logLevel": {
+            "default": "Information",
+            "Microsoft": "Warning"
+        },
         "OpenTelemetry": {
             "logLevel": {
                 "default": "Information",
@@ -15,6 +19,6 @@
             "samplingSettings": {
                 "isEnabled": false
             }
-        }        
+        }
     }
 }
