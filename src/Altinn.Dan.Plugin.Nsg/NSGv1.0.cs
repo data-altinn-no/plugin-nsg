@@ -709,7 +709,7 @@ namespace Altinn.Dan.Plugin.Nsg
             var orgs = orgData?.Organisationer;
             if (orgs == null || orgs.Count == 0)
             {
-                _logger.LogWarning("404 source: VDM returned 200 but empty Organisationer list");
+                _logger.LogInformation("404 source: VDM returned 200 but empty Organisationer list");
                 throw new NsgException("TBD", "urn:bronnoysundregistrene:error:validation", "not.found", "Notation",
                     "Organisation does not exist or has been deleted", 404, "Not found");
             }
@@ -722,7 +722,7 @@ namespace Altinn.Dan.Plugin.Nsg
 
             if (activeOrgs.Count == 0)
             {
-                _logger.LogWarning("404 source: no active registrations after filtering shell/deregistered entries (had {Count} total)", orgs.Count);
+                _logger.LogInformation("404 source: no active registrations after filtering shell/deregistered entries (had {Count} total)", orgs.Count);
                 throw new NsgException("TBD", "urn:bronnoysundregistrene:error:validation", "not.found", "Notation",
                     "Organisation does not exist or has been deleted", 404, "Not found");
             }
