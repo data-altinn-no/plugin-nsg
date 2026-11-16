@@ -183,17 +183,7 @@ namespace Altinn.Dan.Plugin.Nsg
             request.Headers.TryAddWithoutValidation("Content-Type", "application/json");
             request.Headers.TryAddWithoutValidation("Accept", "application/json");
 
-            var handler = new HttpClientHandler();
-            handler.ClientCertificateOptions = ClientCertificateOption.Manual;
-            handler.ServerCertificateCustomValidationCallback =
-                (httpRequestMessage, cert, cetChain, policyErrors) =>
-                {
-                    return true;
-                };
-
-            var client = new HttpClient(handler);
-
-            var response = await client.SendAsync(request);
+            var response = await _client.SendAsync(request);
 
             if (response.IsSuccessStatusCode)
             {
